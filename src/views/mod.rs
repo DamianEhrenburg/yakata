@@ -1,8 +1,10 @@
 pub mod add_vn;
 pub mod detail;
+pub mod dropdown;
 pub mod library;
 pub mod settings;
 pub use add_vn::{AddVnForm, NewVN};
 pub use detail::DetailView;
-pub use library::LibraryView;
+pub use dropdown::{Dropdown, DropdownOption};
+pub use library::{LibraryView, local_path_to_data_url};
 pub use settings::SettingsView;

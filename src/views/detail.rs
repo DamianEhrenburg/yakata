@@ -1,9 +1,11 @@
-use crate::models::{LaunchMode, StoryRoute, VisualNovel};
-use crate::views::library::cover_source;
+use crate::models::{LaunchMode, NovelStatus, StoryRoute, VisualNovel};
+use crate::views::dropdown::{Dropdown, DropdownOption};
+use crate::views::library::{cover_source, is_vn_nsfw};
 use crate::vn_markup::{DescriptionPart, parse_description};
 use crate::wine::{ProtonRunner, SteamPrefix, WineRunner};
 use dioxus::prelude::*;
 use rfd::FileDialog;
+
 #[derive(Debug, Clone, PartialEq)]
 enum DetailTab {
     Info,
@@ -11,10 +13,26 @@ enum DetailTab {
     Routes,
     History,
 }
-///displays details for one selected vn
+
+fn open_url_in_browser(url: &str) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("rundll32")
+            .args(["url.dll,FileProtocolHandler", url])
+            .spawn();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn();
+    }
+}
+
 #[component]
 pub fn DetailView(
     vn: VisualNovel,
+    blur_nsfw: bool,
     wine_runners: Vec<WineRunner>,
     proton_runners: Vec<ProtonRunner>,
     steam_prefixes: Vec<SteamPrefix>,
@@ -41,6 +59,9 @@ pub fn DetailView(
     on_cover_refresh: EventHandler<u64>,
     on_active_route_change: EventHandler<(u64, Option<String>)>,
     on_route_delete: EventHandler<(u64, String)>,
+    on_status_change: EventHandler<(u64, Option<NovelStatus>)>,
+    on_rating_change: EventHandler<(u64, Option<u8>)>,
+    on_run_with_locale_emulator_change: EventHandler<(u64, bool)>,
 ) -> Element {
     let mut new_route_name = use_signal(String::new);
     let typed_route_name = new_route_name.read().clone();
@@ -94,6 +115,7 @@ pub fn DetailView(
     let description_parts = parse_description(saved_description.clone());
     let mut new_tag_text = use_signal(String::new);
     let new_tag_value = new_tag_text.read().clone();
+    let mut delete_is_confirming = use_signal(|| false);
     let mut tag_editor_is_open = use_signal(|| false);
     let tag_editor_open = *tag_editor_is_open.read();
     let mut active_tab = use_signal(|| DetailTab::Info);
@@ -113,10 +135,19 @@ pub fn DetailView(
                 h2 { "{vn.title}" }
                 div { class: "detail-cover-frame",
                     if let Some(cover_src) = cover_source(vn.clone()) {
-                        img {
-                            class: "detail-cover",
-                            src: "{cover_src}",
-                            alt: "Cover art for {vn.title}",
+                        {
+                            let cover_class = if blur_nsfw && is_vn_nsfw(&vn) {
+                                "detail-cover nsfw-blur"
+                            } else {
+                                "detail-cover"
+                            };
+                            rsx! {
+                                img {
+                                    class: "{cover_class}",
+                                    src: "{cover_src}",
+                                    alt: "Cover art for {vn.title}",
+                                }
+                            }
                         }
                     } else {
                         div { class: "detail-cover-placeholder", "No cover" }
@@ -180,6 +211,84 @@ pub fn DetailView(
             }
             div { class: "detail-tab-content",
                 if selected_tab == DetailTab::Info {
+                    div { class: "detail-tracker-row",
+                        div { class: "detail-tracker-field",
+                            label { "Status" }
+                            Dropdown {
+                                options: vec![
+                                    DropdownOption::new("none", "No status"),
+                                    DropdownOption::new("reading", "Reading"),
+                                    DropdownOption::new("completed", "Completed"),
+                                    DropdownOption::new("plan_to_read", "Plan to Read"),
+                                    DropdownOption::new("on_hold", "On Hold"),
+                                    DropdownOption::new("dropped", "Dropped"),
+                                ],
+                                selected_value: match vn.status {
+                                    Some(NovelStatus::Reading) => "reading",
+                                    Some(NovelStatus::Completed) => "completed",
+                                    Some(NovelStatus::PlanToRead) => "plan_to_read",
+                                    Some(NovelStatus::OnHold) => "on_hold",
+                                    Some(NovelStatus::Dropped) => "dropped",
+                                    None => "none",
+                                }.to_string(),
+                                on_select: move |val: String| {
+                                    let status = match val.as_str() {
+                                        "reading" => Some(NovelStatus::Reading),
+                                        "completed" => Some(NovelStatus::Completed),
+                                        "plan_to_read" => Some(NovelStatus::PlanToRead),
+                                        "on_hold" => Some(NovelStatus::OnHold),
+                                        "dropped" => Some(NovelStatus::Dropped),
+                                        _ => None,
+                                    };
+                                    on_status_change.call((vn.id, status));
+                                },
+                            }
+                        }
+                        div { class: "detail-tracker-field",
+                            label { "Score" }
+                            Dropdown {
+                                options: vec![
+                                    DropdownOption::new("none", "No score"),
+                                    DropdownOption::with_sublabel("10", "★ 10", "Masterpiece"),
+                                    DropdownOption::with_sublabel("9", "★ 9", "Great"),
+                                    DropdownOption::with_sublabel("8", "★ 8", "Very Good"),
+                                    DropdownOption::with_sublabel("7", "★ 7", "Good"),
+                                    DropdownOption::with_sublabel("6", "★ 6", "Fine"),
+                                    DropdownOption::with_sublabel("5", "★ 5", "Average"),
+                                    DropdownOption::with_sublabel("4", "★ 4", "Bad"),
+                                    DropdownOption::with_sublabel("3", "★ 3", "Very Bad"),
+                                    DropdownOption::with_sublabel("2", "★ 2", "Horrible"),
+                                    DropdownOption::with_sublabel("1", "★ 1", "Appalling"),
+                                ],
+                                selected_value: vn.rating.map(|r| r.to_string()).unwrap_or_else(|| "none".to_string()),
+                                on_select: move |val: String| {
+                                    let rating = if val == "none" {
+                                        None
+                                    } else {
+                                        val.parse::<u8>().ok()
+                                    };
+                                    on_rating_change.call((vn.id, rating));
+                                },
+                            }
+                        }
+                    }
+                    {
+                        let vndb_url = if let Some(ref vid) = vn.vndb_id {
+                            format!("https://vndb.org/{vid}")
+                        } else {
+                            let clean_title = vn.title.replace(' ', "+");
+                            format!("https://vndb.org/v/all?sq={clean_title}")
+                        };
+                        rsx! {
+                            button {
+                                class: "vndb-link-button",
+                                onclick: move |_| {
+                                    open_url_in_browser(&vndb_url);
+                                },
+                                "Open on VNDB ↗"
+                            }
+                        }
+                    }
                     h3 { "Tags" }
                     div { class: "tag-editor",
                         div { class: "tag-chip-list",
@@ -201,7 +310,7 @@ pub fn DetailView(
                                                 next_tags.retain(|tag| tag != &tag_to_remove);
                                                 on_tags_change_for_remove.call((vn_id, next_tags));
                                             },
-                                            span { "{tag}" }
+                                            span { class: "tag-chip-label", "{tag}" }
                                             span { class: "tag-chip-remove", "✕" }
                                         }
                                     }
@@ -212,10 +321,14 @@ pub fn DetailView(
                                     class: "tag-editor-input inline",
                                     value: "{new_tag_value}",
                                     placeholder: "Tag name",
+                                    maxlength: "30",
                                     autofocus: true,
 
                                     oninput: move |event| {
-                                        new_tag_text.set(event.value());
+                                        let val = event.value();
+                                        if val.chars().count() <= 30 {
+                                            new_tag_text.set(val);
+                                        }
                                     },
 
                                     onkeydown: move |event| {
@@ -224,7 +337,7 @@ pub fn DetailView(
                                         if pressed_key == "Enter" {
                                             let typed_tag = new_tag_text.read().trim().to_string();
 
-                                            if typed_tag.is_empty() {
+                                            if typed_tag.is_empty() || typed_tag.chars().count() > 30 {
                                                 return;
                                             }
 
@@ -335,12 +448,32 @@ pub fn DetailView(
                             p { class: "notes-text", "{saved_notes}" }
                         }
                     }
-                    button {
-                        class: "delete-button",
-                        onclick: move |_| {
-                            on_delete.call(vn.id);
-                        },
-                        "Delete VN"
+                    if *delete_is_confirming.read() {
+                        div { class: "delete-confirm-row",
+                            button {
+                                class: "delete-button confirming",
+                                onclick: move |_| {
+                                    delete_is_confirming.set(false);
+                                    on_delete.call(vn.id);
+                                },
+                                "Confirm delete"
+                            }
+                            button {
+                                class: "delete-cancel-button",
+                                onclick: move |_| {
+                                    delete_is_confirming.set(false);
+                                },
+                                "Cancel"
+                            }
+                        }
+                    } else {
+                        button {
+                            class: "delete-button",
+                            onclick: move |_| {
+                                delete_is_confirming.set(true);
+                            },
+                            "Delete VN"
+                        }
                     }
                 }
                 if selected_tab == DetailTab::Launch {
@@ -372,28 +505,49 @@ pub fn DetailView(
                         },
                         "Choose executable"
                     }
-                    label { class: "launch-selector",
-                        "Launch mode"
-                        select {
-                            value: match vn.launch_mode {
+                    if cfg!(target_os = "windows") {
+                        label { class: "locale-emulator-checkbox-label",
+                            input {
+                                r#type: "checkbox",
+                                checked: vn.run_with_locale_emulator,
+                                onchange: move |event| {
+                                    on_run_with_locale_emulator_change.call((vn.id, event.checked()));
+                                },
+                            }
+                            span { "Run with Locale Emulator (LEProc)" }
+                        }
+                    }
+                    div { class: "launch-selector",
+                        label { "Launch mode" }
+                        {
+                            let mut launch_opts = vec![DropdownOption::new("native", "Native")];
+                            if cfg!(target_os = "linux") {
+                                launch_opts.push(DropdownOption::new("wine", "Wine"));
+                                launch_opts.push(DropdownOption::new("proton", "Proton"));
+                            }
+                            launch_opts.push(DropdownOption::new("steam", "Steam"));
+                            let cur_val = match vn.launch_mode {
                                 LaunchMode::Native => "native",
                                 LaunchMode::Wine => "wine",
                                 LaunchMode::Proton => "proton",
                                 LaunchMode::Steam => "steam",
-                            },
-                            onchange: move |event| {
-                                let launch_mode = match event.value().as_str() {
-                                    "wine" => LaunchMode::Wine,
-                                    "proton" => LaunchMode::Proton,
-                                    "steam" => LaunchMode::Steam,
-                                    _ => LaunchMode::Native,
-                                };
-                                on_launch_mode_change.call((vn.id, launch_mode))
-                            },
-                            option { value: "native", "Native" }
-                            option { value: "wine", "Wine" }
-                            option { value: "proton", "Proton" }
-                            option { value: "steam", "Steam" }
+                            }.to_string();
+                            rsx! {
+                                Dropdown {
+                                    class: "drop-up".to_string(),
+                                    options: launch_opts,
+                                    selected_value: cur_val,
+                                    on_select: move |val: String| {
+                                        let launch_mode = match val.as_str() {
+                                            "wine" => LaunchMode::Wine,
+                                            "proton" => LaunchMode::Proton,
+                                            "steam" => LaunchMode::Steam,
+                                            _ => LaunchMode::Native,
+                                        };
+                                        on_launch_mode_change.call((vn.id, launch_mode));
+                                    },
+                                }
+                            }
                         }
                     }
                     if show_compatibility_settings {
@@ -468,8 +622,7 @@ pub fn DetailView(
                                             },
                                             option {
                                                 value: "",
-                                                selected: proton_path_value
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        .is_empty(),
+                                                selected: proton_path_value.is_empty(),
                                                 "UMU managed default"
                                             }
                                             for runner in proton_runners.clone() {
@@ -686,10 +839,15 @@ pub fn DetailView(
                         }
                     }
                     h3 { "Play sessions" }
-                    ul {
-                        for session in vn.play_sessions.clone() {
-                            li {
-                                "{format_started_at(session.started_at.clone())} - {session.duration_seconds} seconds"
+                    if vn.play_sessions.is_empty() {
+                        p { class: "stat-label", "No play sessions recorded yet." }
+                    } else {
+                        ul { class: "history-session-list",
+                            for session in vn.play_sessions.iter().rev() {
+                                li { class: "history-session-item",
+                                    span { class: "session-date", "{format_started_at(session.started_at.clone())}" }
+                                    span { class: "session-duration", "{format_session_duration(session.duration_seconds)}" }
+                                }
                             }
                         }
                     }
@@ -726,18 +884,24 @@ pub fn DetailView(
                         },
                         "Add route"
                     }
-                    label {
-                        "Active route"
-                        select {
-                            value: vn.active_route.clone().unwrap_or_default(),
-                            onchange: move |event| {
-                                let route_name = event.value();
-                                let active_route = if route_name.is_empty() { None } else { Some(route_name) };
-                                on_active_route_change.call((vn.id, active_route));
-                            },
-                            option { value: "", "No active route" }
+                    div { class: "route-selector-field",
+                        label { "Active route" }
+                        {
+                            let mut route_opts = vec![DropdownOption::new("", "No active route")];
                             for route in vn.routes.clone() {
-                                option { value: "{route.name}", "{route.name}" }
+                                route_opts.push(DropdownOption::new(route.name.clone(), route.name.clone()));
+                            }
+                            let cur_route = vn.active_route.clone().unwrap_or_default();
+                            rsx! {
+                                Dropdown {
+                                    class: "drop-up".to_string(),
+                                    options: route_opts,
+                                    selected_value: cur_route,
+                                    on_select: move |val: String| {
+                                        let active_route = if val.is_empty() { None } else { Some(val) };
+                                        on_active_route_change.call((vn.id, active_route));
+                                    },
+                                }
                             }
                         }
                     }
@@ -781,6 +945,7 @@ pub fn DetailView(
         }
     }
 }
+
 fn format_started_at(started_at: String) -> String {
     let parsed_time = match chrono::DateTime::parse_from_rfc3339(&started_at) {
         Ok(time) => time,
@@ -788,6 +953,7 @@ fn format_started_at(started_at: String) -> String {
     };
     parsed_time.format("%Y-%m-%d %H:%M:%S").to_string()
 }
+
 fn format_playtime(total_seconds: u64) -> String {
     let hours = total_seconds as f64 / 3600.0;
     if hours < 1.0 {
@@ -797,7 +963,29 @@ fn format_playtime(total_seconds: u64) -> String {
         format!("{hours:.1} hrs")
     }
 }
-///need a component because dioxus hates match or something
+
+fn format_session_duration(seconds: u64) -> String {
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        let minutes = seconds / 60;
+        let rem_seconds = seconds % 60;
+        if rem_seconds > 0 {
+            format!("{minutes}m {rem_seconds}s")
+        } else {
+            format!("{minutes}m")
+        }
+    } else {
+        let hours = seconds / 3600;
+        let minutes = (seconds % 3600) / 60;
+        if minutes > 0 {
+            format!("{hours}h {minutes}m")
+        } else {
+            format!("{hours}h")
+        }
+    }
+}
+
 #[component]
 fn DescriptionPartView(part: DescriptionPart) -> Element {
     match part {
@@ -828,6 +1016,7 @@ fn DescriptionPartView(part: DescriptionPart) -> Element {
         }
     }
 }
+
 #[component]
 fn SpoilerText(parts: Vec<DescriptionPart>) -> Element {
     let mut is_revealed = use_signal(|| false);
@@ -851,6 +1040,7 @@ fn SpoilerText(parts: Vec<DescriptionPart>) -> Element {
         }
     }
 }
+
 #[component]
 fn RouteItem(
     vn_id: u64,

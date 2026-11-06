@@ -3,7 +3,7 @@
 [web.app]
 
 # HTML title tag content
-title = "kakera"
+title = "Yakata"
 
 # include `assets` in web platform
 [web.resource]
@@ -21,7 +21,16 @@ script = []
 script = []
 
 [bundle]
-identifier = "com.enotan"
+identifier = "com.damian.yakata"
 
-publisher = "enotan"
+publisher = "Damian Ehrenburg"
 icon = ["assets/favicon.ico"]
+
+[bundle.windows]
+webview_install_mode = "Skip"
+
+[bundle.windows.nsis]
+install_mode = "CurrentUser"
+installer_icon = "assets/favicon.ico"
+sidebar_image = "assets/installer_sidebar.bmp"
+header_image = "assets/installer_header.bmp"

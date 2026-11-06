@@ -20,119 +20,56 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Run unit tests
+        run: cargo test
+
       - name: Install Dioxus CLI
         run: cargo install --locked dioxus-cli
 
       - name: Install packing tools
         run: |
           choco install nsis -y
-          choco install wixtoolset -y
 
       - name: Build Windows bundles
         run: |
-          dx bundle --release --platform windows --package-types nsis --package-types msi
+          dx bundle --release --platform windows --package-types nsis
+
+      - name: Prepare Windows artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path staging -Force
+          $setup = Get-ChildItem -Path target/dx -Filter "*setup.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $setup) {
+            $setup = Get-ChildItem -Path target/dx -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*nsis*" } | Select-Object -First 1
+          }
+          if ($setup) {
+            Copy-Item $setup.FullName -Destination "staging/Yakata-Setup.exe"
+          }
+          $appExe = Get-ChildItem -Path target/dx -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*release*windows*app*" } | Select-Object -First 1
+          if ($appExe) {
+            $appDir = $appExe.DirectoryName
+            Compress-Archive -Path "$appDir/*" -DestinationPath "staging/Yakata-Portable.zip" -Force
+          }
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: kakera-windows
-          path: |
-            target/dx/kakera/bundle/windows/**/*.exe
-            target/dx/kakera/bundle/windows/**/*.msi
+          name: yakata-windows
+          path: staging/*
 
-  linux:
-    name: Linux deb/appimage
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Linux dependencies
-        run: |
-          sudo apt update
-          sudo apt install -y \
-            libwebkit2gtk-4.1-dev \
-            build-essential \
-            curl \
-            wget \
-            file \
-            libxdo-dev \
-            libssl-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            xdg-utils \
-            lld
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Dioxus CLI
-        run: cargo install --locked dioxus-cli
-
-      - name: Build Linux bundles
-        run: |
-          dx bundle --release --platform linux --package-types deb --package-types appimage
-
-      - name: Upload Linux artifacts
-        uses: actions/upload-artifact@v4
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
-          name: kakera-linux
-          path: |
-            target/dx/kakera/bundle/linux/**/*.deb
-            target/dx/kakera/bundle/linux/**/*.AppImage
-            target/dx/kakera/bundle/linux/**/*.appimage
+          files: staging/*
+          name: Yakata ${{ github.ref_name }}
+          body: |
+            ### What's new
 
-  flatpak:
-    name: Flatpak bundle
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Flatpak tooling
-        run: |
-          sudo apt update
-          sudo apt install -y flatpak flatpak-builder git
-
-      - name: Add Flathub
-        run: |
-          flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-     
-      - name: Build Flatpak
-        run: |
-          flatpak-builder \
-            --user \
-            --force-clean \
-            --install-deps-from=flathub \
-            --repo=flatpak-repo \
-            flatpak-build \
-            xyz.majou.Kakera.yml
-
-      - name: Build Flatpak bundle
-        run: |
-          flatpak build-bundle \
-            flatpak-repo \
-            Kakera_${{ github.ref_name }}_x86_64.flatpak \
-            xyz.majou.Kakera
-
-      - name: Upload Flatpak artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kakera-flatpak
-          path: "*.flatpak"
-
-  nix:
-    name: Nix flake
-    runs-on: ubuntu-24.04
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: DeterminateSystems/determinate-nix-action@v3
-
-      - name: Validate flake
-        run: nix flake check --no-build
-
-      - name: Build Nix package
-        run: nix build .#kakera --print-build-logs
+            - Windows process tree tracking across game launchers and engine wrappers
+            - Locale Emulator (LEProc) support and Shift-JIS path detection
+            - Dark interface with responsive grid, custom dropdowns, and VNDB spoiler tags
+            - Two-column Add VN modal with live VNDB search preview
+            - Route progress tracking, novel notes, and Discord Rich Presence
+            - Blur filter for 18+ adult covers with reveal on hover
+            - NSIS installer and standalone portable zip builds

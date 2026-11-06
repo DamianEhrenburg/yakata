@@ -1,8 +1,8 @@
 use crate::models::{AppSettings, VisualNovel};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
-///returns app data dir
-pub fn kakera_data_dir() -> Result<PathBuf, io::Error> {
+
+pub fn yakata_data_dir() -> Result<PathBuf, io::Error> {
     let data_dir = match dirs::data_dir() {
         Some(path) => path,
         None => {
@@ -12,13 +12,22 @@ pub fn kakera_data_dir() -> Result<PathBuf, io::Error> {
             ));
         }
     };
-    Ok(data_dir.join("kakera"))
+    let yakata_dir = data_dir.join("yakata");
+    let kakera_dir = data_dir.join("kakera");
+    if !yakata_dir.join("library_json").exists() && kakera_dir.join("library_json").exists() {
+        let _ = fs::create_dir_all(&yakata_dir);
+        let _ = fs::copy(kakera_dir.join("library_json"), yakata_dir.join("library_json"));
+        if kakera_dir.join("settings.json").exists() && !yakata_dir.join("settings.json").exists() {
+            let _ = fs::copy(kakera_dir.join("settings.json"), yakata_dir.join("settings.json"));
+        }
+    }
+    Ok(yakata_dir)
 }
-/// Returns the path where Kakera stores the JSON file
+
 pub fn library_file_path() -> Result<PathBuf, io::Error> {
-    Ok(kakera_data_dir()?.join("library_json"))
+    Ok(yakata_data_dir()?.join("library_json"))
 }
-///Loads the library from disk, returns empty if the files don't exist yet
+
 pub fn load_library() -> Result<Vec<VisualNovel>, io::Error> {
     let library_file = library_file_path()?;
     let json_text = match fs::read_to_string(&library_file) {
@@ -38,7 +47,7 @@ pub fn load_library() -> Result<Vec<VisualNovel>, io::Error> {
     };
     Ok(library)
 }
-///saves the library to disk as a json
+
 pub fn save_library(library: Vec<VisualNovel>) -> Result<(), io::Error> {
     let library_file = library_file_path()?;
     let library_dir = match library_file.parent() {
@@ -46,7 +55,7 @@ pub fn save_library(library: Vec<VisualNovel>) -> Result<(), io::Error> {
         None => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                "library file path has no parent directory",
+                "Library file path has no parent directory",
             ));
         }
     };
@@ -55,13 +64,69 @@ pub fn save_library(library: Vec<VisualNovel>) -> Result<(), io::Error> {
     fs::write(library_file, json_text)?;
     Ok(())
 }
-///adds one play session to the save file
+
+pub fn export_library_backup(dest_path: &Path) -> Result<(), io::Error> {
+    let library = load_library()?;
+    let json_text = serde_json::to_string_pretty(&library)?;
+    fs::write(dest_path, json_text)?;
+    Ok(())
+}
+
+pub fn import_library_backup(src_path: &Path) -> Result<Vec<VisualNovel>, io::Error> {
+    let json_text = fs::read_to_string(src_path)?;
+    let library = serde_json::from_str::<Vec<VisualNovel>>(&json_text)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    save_library(library.clone())?;
+    Ok(library)
+}
+
+#[allow(dead_code)]
+pub fn add_vn_to_library(vn: VisualNovel) -> Result<(), io::Error> {
+    let mut library = load_library()?;
+    library.push(vn);
+    save_library(library)?;
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn update_vn_in_library<F>(vn_id: u64, update_fn: F) -> Result<(), io::Error>
+where
+    F: FnOnce(&mut VisualNovel),
+{
+    let mut library = load_library()?;
+    if let Some(vn) = library.iter_mut().find(|vn| vn.id == vn_id) {
+        update_fn(vn);
+        save_library(library)?;
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("VN with ID {vn_id} not found in library"),
+        ))
+    }
+}
+
+#[allow(dead_code)]
+pub fn remove_vn_from_library(vn_id: u64) -> Result<(), io::Error> {
+    let mut library = load_library()?;
+    let initial_len = library.len();
+    library.retain(|vn| vn.id != vn_id);
+    if library.len() == initial_len {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("VN with ID {vn_id} not found in library"),
+        ));
+    }
+    save_library(library)?;
+    Ok(())
+}
+
 pub fn add_play_session_to_library(
     vn_id: u64,
     play_session: crate::models::PlaySession,
 ) -> Result<(), io::Error> {
     let mut library = load_library()?;
-    for vn in library.iter_mut() {
+    for vn in &mut library {
         if vn.id == vn_id {
             vn.play_sessions.push(play_session.clone());
         }
@@ -69,11 +134,11 @@ pub fn add_play_session_to_library(
     save_library(library)?;
     Ok(())
 }
-///returns the path where settings are stored
+
 pub fn settings_file_path() -> Result<PathBuf, io::Error> {
-    Ok(kakera_data_dir()?.join("settings.json"))
+    Ok(yakata_data_dir()?.join("settings.json"))
 }
-///loads the settings
+
 pub fn load_settings() -> Result<AppSettings, io::Error> {
     let settings_file = settings_file_path()?;
     let json_text = match fs::read_to_string(&settings_file) {
@@ -93,7 +158,7 @@ pub fn load_settings() -> Result<AppSettings, io::Error> {
     };
     Ok(settings)
 }
-///saves settings
+
 pub fn save_settings(settings: AppSettings) -> Result<(), io::Error> {
     let settings_file = settings_file_path()?;
     let settings_dir = match settings_file.parent() {

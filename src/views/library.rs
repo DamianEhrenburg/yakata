@@ -2,10 +2,12 @@ use crate::models::VisualNovel;
 use base64::Engine;
 use dioxus::prelude::*;
 use std::fs;
+
 #[component]
 pub fn LibraryView(
     vns: Vec<VisualNovel>,
     selected_vn_id: Option<u64>,
+    blur_nsfw: bool,
     on_select: EventHandler<u64>,
     on_toggle_favourite: EventHandler<u64>,
 ) -> Element {
@@ -59,7 +61,10 @@ pub fn LibraryView(
                                         }
                                     }
                                     div { class: "vn-cover-frame",
-                                        VnCover { vn: vn.clone() }
+                                        VnCover { vn: vn.clone(), blur: blur_nsfw && is_vn_nsfw(&vn) }
+                                        if let Some(rating) = vn.rating {
+                                            span { class: "vn-rating-badge", "★ {rating}" }
+                                        }
                                     }
                                     div { class: "vn-card-info",
                                         h3 { "{vn.title}" }
@@ -81,22 +86,21 @@ pub fn LibraryView(
     }
 }
 
-///renders a vn cover and replaces failed image requests with a placeholder
-
 #[component]
-fn VnCover(vn: VisualNovel) -> Element {
+fn VnCover(vn: VisualNovel, blur: bool) -> Element {
     let mut image_failed = use_signal(|| false);
     let has_failed = *image_failed.read();
 
     let title = vn.title.clone();
     let cover_src = cover_source(vn);
+    let cover_class = if blur { "vn-cover nsfw-blur" } else { "vn-cover" };
 
     rsx! {
         if has_failed {
             div { class: "vn-cover-placeholder", "No cover" }
         } else if let Some(src) = cover_src {
             img {
-                class: "vn-cover",
+                class: "{cover_class}",
                 src: "{src}",
                 alt: "Cover art for {title}",
                 onerror: move |_| {
@@ -108,25 +112,52 @@ fn VnCover(vn: VisualNovel) -> Element {
         }
     }
 }
-///returns an image source that webview can display for windows users
-pub fn cover_source(vn: VisualNovel) -> Option<String> {
-    match vn.cover_path {
-        Some(path) => local_cover_source(path),
-        None => vn.cover_url,
+
+pub fn is_vn_nsfw(vn: &VisualNovel) -> bool {
+    let has_nsfw_text = |s: &str| {
+        let lower = s.to_lowercase();
+        lower.contains("18+")
+            || lower.contains("eroge")
+            || lower.contains("nukige")
+            || lower.contains("hentai")
+            || lower.contains("sexual")
+            || lower.contains("nsfw")
+            || lower.contains("adult")
+    };
+    if vn.tags.iter().any(|t| has_nsfw_text(t)) {
+        return true;
     }
+    if has_nsfw_text(&vn.title) {
+        return true;
+    }
+    if let Some(ref desc) = vn.description {
+        if has_nsfw_text(desc) {
+            return true;
+        }
+    }
+    false
 }
-///converts a saved local cover path into a webview image source
+
+pub fn cover_source(vn: VisualNovel) -> Option<String> {
+    if let Some(path) = vn.cover_path {
+        if let Some(data_url) = local_cover_source(path) {
+            return Some(data_url);
+        }
+    }
+    vn.cover_url
+}
+
 fn local_cover_source(path: String) -> Option<String> {
     local_path_to_data_url(&path)
 }
-///reads a local image file and turns it into data:image/... url
-fn local_path_to_data_url(path: &str) -> Option<String> {
+
+pub fn local_path_to_data_url(path: &str) -> Option<String> {
     let image_bytes = fs::read(path).ok()?;
     let mime_type = image_mime_type(path);
     let encoded_image = base64::engine::general_purpose::STANDARD.encode(image_bytes);
     Some(format!("data:{mime_type};base64,{encoded_image}"))
 }
-///match mime type to file extension
+
 fn image_mime_type(path: &str) -> &'static str {
     let lower_path = path.to_lowercase();
     if lower_path.ends_with(".png") {

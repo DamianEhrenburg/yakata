@@ -1,4 +1,3 @@
-///convert the vndb weird formatting
 #[derive(Debug, Clone, PartialEq)]
 pub enum DescriptionPart {
     Text(String),
@@ -7,7 +6,6 @@ pub enum DescriptionPart {
     Link { label: String, url: String },
     Spoiler(Vec<DescriptionPart>),
 }
-///parse the description
 pub fn parse_description(description: String) -> Vec<DescriptionPart> {
     let mut parts = Vec::new();
     let mut remaining = description.as_str();
@@ -60,4 +58,72 @@ pub fn parse_description(description: String) -> Vec<DescriptionPart> {
         remaining = &remaining[plain_text_len..];
     }
     parts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_plain_text() {
+        let parts = parse_description("Simple description without markup".to_string());
+        assert_eq!(
+            parts,
+            vec![DescriptionPart::Text("Simple description without markup".to_string())]
+        );
+    }
+
+    #[test]
+    fn test_bold_and_italic() {
+        let parts = parse_description("[b]Bold text[/b] and [i]italic text[/i]".to_string());
+        assert_eq!(
+            parts,
+            vec![
+                DescriptionPart::Bold("Bold text".to_string()),
+                DescriptionPart::Text(" and ".to_string()),
+                DescriptionPart::Italic("italic text".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_url_parsing() {
+        let parts = parse_description("Visit [url=https://vndb.org/v1]VNDB[/url] now".to_string());
+        assert_eq!(
+            parts,
+            vec![
+                DescriptionPart::Text("Visit ".to_string()),
+                DescriptionPart::Link {
+                    label: "VNDB".to_string(),
+                    url: "https://vndb.org/v1".to_string(),
+                },
+                DescriptionPart::Text(" now".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_spoiler_block() {
+        let parts = parse_description("Intro [spoiler]Secret revelation[/spoiler]".to_string());
+        assert_eq!(
+            parts,
+            vec![
+                DescriptionPart::Text("Intro ".to_string()),
+                DescriptionPart::Spoiler(vec![DescriptionPart::Text("Secret revelation".to_string())]),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_nested_spoiler_markup() {
+        let parts = parse_description("[spoiler]Critical [b]plot[/b] point[/spoiler]".to_string());
+        assert_eq!(
+            parts,
+            vec![DescriptionPart::Spoiler(vec![
+                DescriptionPart::Text("Critical ".to_string()),
+                DescriptionPart::Bold("plot".to_string()),
+                DescriptionPart::Text(" point".to_string()),
+            ])]
+        );
+    }
 }

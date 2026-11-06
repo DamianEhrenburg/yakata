@@ -1,228 +1,68 @@
-![Kakera Logo](./assets/kakeralogoblue.png)
-
-<h1 align="center">Kakera</h1>
-
 <p align="center">
-  <a href="https://github.com/enotan/kakera/releases/latest">
-    <img src="https://img.shields.io/github/v/release/enotan/kakera?label=latest%20release" alt="Latest release">
-  </a>
-  <a href="https://aur.archlinux.org/packages/kakera">
-    <img src="https://img.shields.io/aur/version/kakera?label=AUR" alt="AUR package">
-  </a>
-  <a href="https://aur.archlinux.org/packages/kakera-bin">
-    <img src="https://img.shields.io/aur/version/kakera-bin?label=AUR%20binary" alt="AUR binary package">
-  </a>
-  <a href="https://github.com/enotan/kakera/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/enotan/kakera" alt="License">
-  </a>
-  <a href="https://github.com/enotan/kakera/releases">
-    <img src="https://img.shields.io/github/downloads/enotan/kakera/total" alt="Release downloads">
-  </a>
+  <img src="./assets/yakatalogo.png" alt="Yakata Logo" width="440">
 </p>
 
-Kakera is a visual novel library, launcher, and playtime tracker built with Rust and Dioxus-CLI.
+<h1 align="center">Yakata</h1>
 
-![Screenshot preview](./assets/screenshot.png)
+<p align="center">
+  <a href="https://github.com/DamianEhrenburg/yakata/releases/latest">
+    <img src="https://img.shields.io/badge/release-v0.2.0-b91c1c?style=flat-square" alt="Latest release">
+  </a>
+  <a href="https://github.com/DamianEhrenburg/yakata/blob/main/LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-3f3f46?style=flat-square" alt="License">
+  </a>
+  <img src="https://img.shields.io/badge/platform-Windows-1e1b4b?style=flat-square" alt="Platform Windows">
+</p>
 
-![Rich Presence preview](./assets/richpresencess.png)
+<p align="center">
+  Visual novel library, launcher, and playtime tracker for Windows, built with Rust and Dioxus.
+</p>
+
+<p align="center">
+  <img src="./assets/screenshot.png" alt="Yakata Library Preview" width="100%">
+</p>
+
+<p align="center">
+  <img src="./assets/discord_activity.png" alt="Discord Rich Presence Preview" width="85%">
+</p>
 
 ## Overview
 
-Kakera works as a hub for launching and keeping track of all your visual novels.
-The majority of people use Steam as a central launcher for all their games, but many visual novels aren't available on Steam, and many are forced to buy from other sources which can get hard to keep track of. Kakera lets you add visual novels from VNDB, launch them, show a Discord Rich Presence, and track playtime.
+Yakata is a desktop visual novel launcher and tracker for Windows. It catalogs your collection, pulls metadata and covers from VNDB, monitors playtime across multi-process engine wrappers, and displays Discord Rich Presence.
 
 ## Features
 
-- Add visual novels manually or search from VNDB
-- Browse visual novels in a beautiful cover-art library grid
-- View and edit descriptions, notes, routes, and cover images
-- Add and track active routes and completed routes
-- Allows running visual novels with Wine for Linux operating systems, with settings to change locale and add custom arguments
-- Track play sessions and total playtime
-- Caches VN cover images locally so internet connection isn't always required to keep a nice looking library
-- Shows Discord Rich Presence while a VN is running, customizable in settings
-- Stores library and settings as local JSON files
+- Add visual novels manually or fetch metadata and cover art from VNDB
+- Read synopses with expandable spoiler blocks
+- Track total playtime and session logs across child processes and engine wrappers
+- Launch Japanese titles with Locale Emulator (LEProc) directly from the app
+- Auto-detect Shift-JIS and UTF-8 folder paths for older visual novels
+- Filter and sort by reading status, 10-point personal score, favourites, and tags
+- Track story routes, playtime sessions, and personal notes
+- Discord Rich Presence with game status, route, and elapsed playtime
+- Blur adult covers with reveal on hover
+- Export and import library backups as JSON
 
-## Supported Platforms
+## Download
 
-Kakera currently supports:
+Get the installer or portable archive from [Releases](https://github.com/DamianEhrenburg/yakata/releases/latest):
 
-- Linux
-- Windows
-
-macOS isn't supported just yet, as I don't have access to a Mac. But if you own a Mac and want to see it on Mac, please help out!
-
-## Installation
-
-### Windows
-
-```
-Download the latest installer from Releases and that's it.
-```
-
-### All Linux Distributions
-
-#### Flatpak (Recommended)
-
-Flatpak is the recommended package for most Linux distributions. It can avoid certain issues that may be faced when trying to use the AppImage.
-
-```bash
-# Download the latest .flatpak from Releases
-# Run:
-flatpak install --user ./kakera_*.flatpak
-
-flatpak run xyz.majou.Kakera
-```
-
-#### AppImage
-
-```bash
-# Download the latest .AppImage from Releases
-# Run:
-chmod +x kakera_*.AppImage
-
-./kakera_*.AppImage
-
-```
-
-### Arch Linux
-
-```bash
-# Kakera is available on the AUR
-paru -S kakera
-
-# Binary version
-paru -S kakera-bin
-```
-
-### NixOS
-
-Run Kakera directly without installing it:
-
-```bash
-nix run github:enotan/kakera
-```
-
-Install Kakera into your user profile:
-
-```bash
-nix profile add github:enotan/kakera
-```
-
-#### NixOS Flake
-
-Installing Kakera through your NixOS config is recommended, as it installs it as
-a system application with its icon and desktop entry.
-
-Add Kakera to your `flake.nix` inputs:
-
-```nix
-{
-    inputs.kakera.url = "github:enotan/kakera";
-}
-```
-
-Pass the input to your NixOS modules:
-```nix
-outputs =
-    { nixpkgs, kakera, ... }:
-    {
-        nixosConfigurations.nixos = nixpkgs.lib.nixosSystem {
-            system = "x86_64-linux";
-            specialArgs = { inherit kakera; };
-            modules = [ ./configuration.nix ];
-        };
-    };
-```
-
-Then add Kakera to `environment.systemPackages` in `configuration.nix`:
-
-```nix
-{ pkgs, kakera, ... }:
-
-{
-    environment.systemPackages = [
-        kakera.packages.${pkgs.stdenv.hostPlatform.system}.default
-    ];
-}
-```
+- `Yakata-Setup.exe` - Windows Installer (NSIS)
+- `Yakata-Portable.zip` - Standalone portable build
 
 ## Building from Source
 
-### Dependencies
-
-#### Arch Linux Based Systems
+Requires [Rust](https://rustup.rs/) and [Dioxus CLI](https://dioxuslabs.com):
 
 ```bash
-sudo pacman -S webkit2gtk-4.1 base-devel curl wget file openssl appmenu-gtk-module libappindicator-gtk3 librsvg xdotool xdg-utils rust cargo dioxus-cli
-```
-
-#### Debian Based Systems
-
-```bash
-sudo apt install rustc cargo libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev xdg-utils lld
-cargo install dioxus-cli
-```
-
-#### Fedora Based Systems
-
-```bash
-sudo dnf install webkit2gtk4.1-devel openssl-devel curl wget file libxdo-devel libappindicator-gtk3-devel librsvg2-devel xdg-utils rust cargo
 cargo install --locked dioxus-cli
-```
-
-#### Optional Runtime Tools
-
-```
-# For running Windows visual novels on Linux
-wine
-
-# For using Proton
-umu-launcher
-
-# For Discord Rich Presence
-discord # obviously. vesktop, betterdiscord, etc should all work too
-```
-
-### Building
-
-```bash
-git clone https://github.com/enotan/kakera
-
-cd kakera
-
 dx build --release
 ```
 
-## Data Storage
+## Acknowledgments
 
-Kakera stores data in the platform app-data directory.
+Based on [kakera](https://github.com/enotan/kakera) by [enotan](https://github.com/enotan).
 
-On Linux systems, this is usually:
+## License
 
-```text
-~/.local/share/kakera
-```
-
-On Windows, this is usually:
-
-```text
-C:\Users\<USER>\AppData\Roaming\kakera
-```
-
-## Planned Features
-
-- Controller navigation mainly for handheld PCs
-- Windows locale emulator support
-- Fuller notes view with characters (can be imported from VNDB), rich-text formatting and editing (For all the mystery lovers like me)
-- Statistics tab with graphs and visualisations of playtime
-- More themes + custom theming
-- Better UI overall - it's definitely improved a lot but there's still room for improvement
-
-
-## Tech Stack
-
-- Rust 
-- Dioxus for UI
-- VNDB HTTP API
-- Discord Rich Presence IPC
+This project is licensed under the [MIT License](LICENSE).

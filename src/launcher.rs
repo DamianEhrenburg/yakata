@@ -1,5 +1,5 @@
 use crate::models::LaunchMode;
-use crate::storage::kakera_data_dir;
+use crate::storage::yakata_data_dir;
 use crate::system::find_host_command;
 use std::fs::{self, OpenOptions};
 
@@ -14,7 +14,7 @@ const STEAM_WRAPPER_SCRIPT: &str = r#"#!/usr/bin/env bash
 set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-helper="$script_dir/kakera-steam-helper"
+helper="$script_dir/yakata-steam-helper"
 arguments=("$@")
 last_separator=-1
 
@@ -25,13 +25,13 @@ for index in "${!arguments[@]}"; do
 done
 
 if (( last_separator < 0 )); then
-    echo "Kakera wrapper: Steam command did not contain a --
+    echo "Yakata wrapper: Steam command did not contain a --
     separator." >&2
     exit 1
 fi
 
 if [[ ! -x "$helper" ]]; then
-    echo "Kakera wrapper: helper is missing or not executable:
+    echo "Yakata wrapper: helper is missing or not executable:
     $helper" >&2
     exit 1
 fi
@@ -51,7 +51,7 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 app_id="${STEAM_COMPAT_APP_ID:-}"
 
 if [[ -z "$app_id" ]]; then
-    echo "Kakera helper: Steam App ID is unavailable." >&2
+    echo "Yakata helper: Steam App ID is unavailable." >&2
     exit 1
 fi
 
@@ -61,7 +61,7 @@ log_file="$script_dir/helper-$app_id.log"
 
 
 if [[ "$#" -lt 3 ]]; then
-    echo "Kakera helper: incomplete Proton command." >> "$log_file"
+    echo "Yakata helper: incomplete Proton command." >> "$log_file"
     exit 1
 fi
 
@@ -90,7 +90,28 @@ done
 wait "$game_process"
 "#;
 
-///launch the executable
+pub fn detect_leproc_path() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let candidates = [
+            "C:\\Program Files\\Locale Emulator\\LEProc.exe",
+            "C:\\Program Files (x86)\\Locale Emulator\\LEProc.exe",
+        ];
+        for candidate in &candidates {
+            if std::path::Path::new(candidate).exists() {
+                return Some(candidate.to_string());
+            }
+        }
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let user_candidate = format!("{local_app_data}\\Locale Emulator\\LEProc.exe");
+            if std::path::Path::new(&user_candidate).exists() {
+                return Some(user_candidate);
+            }
+        }
+    }
+    None
+}
+
 pub fn launch_executable(
     executable_path: String,
     launch_mode: LaunchMode,
@@ -103,6 +124,8 @@ pub fn launch_executable(
     launch_arguments: String,
     launch_environment: Vec<(String, String)>,
     launch_log_path: Option<PathBuf>,
+    run_with_locale_emulator: bool,
+    leproc_path: Option<String>,
 ) -> Result<Child, io::Error> {
     let path = PathBuf::from(executable_path);
     let working_directory = path.parent().map(Path::to_path_buf);
@@ -124,11 +147,24 @@ pub fn launch_executable(
     }
     let child: Child = match launch_mode {
         LaunchMode::Native => {
-            let mut command = host_command(
-                path.to_string_lossy().to_string(),
-                launch_environment.clone(),
-                working_directory.clone(),
-            );
+            let mut command = if cfg!(target_os = "windows") && run_with_locale_emulator {
+                let leproc = leproc_path
+                    .or_else(detect_leproc_path)
+                    .unwrap_or_else(|| "LEProc.exe".to_string());
+                let mut cmd = host_command(leproc, launch_environment.clone(), working_directory.clone());
+                cmd.arg("-run");
+                cmd.arg(path.to_string_lossy().to_string());
+                cmd.args(launch_arguments.split_whitespace());
+                cmd
+            } else {
+                let mut cmd = host_command(
+                    path.to_string_lossy().to_string(),
+                    launch_environment.clone(),
+                    working_directory.clone(),
+                );
+                cmd.args(launch_arguments.split_whitespace());
+                cmd
+            };
             attach_launch_log(&mut command, stdout_log, stderr_log);
             command.spawn()?
         }
@@ -211,13 +247,11 @@ pub fn launch_executable(
     Ok(child)
 }
 
-///describes how a tool was started
 pub enum ToolLaunch {
     Process(Child),
     Queued,
 }
 
-///launches tools inside a steam game's proton environment
 pub fn launch_steam_tool(
     tool_path: String,
     app_id: u32,
@@ -256,7 +290,7 @@ pub fn launch_steam_tool(
         return Ok(ToolLaunch::Process(command.spawn()?));
     }
 
-    let tools_directory = kakera_data_dir()?.join("steam-tools");
+    let tools_directory = yakata_data_dir()?.join("steam-tools");
     let active_path = tools_directory.join(format!("active-{app_id}"));
 
     if !active_path.is_file() {
@@ -272,14 +306,13 @@ pub fn launch_steam_tool(
     Ok(ToolLaunch::Queued)
 }
 
-/// installs the steam tool scripts and returns the steam launch option
 #[cfg(target_os = "linux")]
 pub fn install_steam_tool_wrapper() -> Result<String, io::Error> {
-    let tools_directory = kakera_data_dir()?.join("steam-tools");
+    let tools_directory = yakata_data_dir()?.join("steam-tools");
     fs::create_dir_all(&tools_directory)?;
 
-    let wrapper_path = tools_directory.join("kakera-steam-wrapper");
-    let helper_path = tools_directory.join("kakera-steam-helper");
+    let wrapper_path = tools_directory.join("yakata-steam-wrapper");
+    let helper_path = tools_directory.join("yakata-steam-helper");
 
     write_executable_script(wrapper_path.clone(), STEAM_WRAPPER_SCRIPT.to_string())?;
     write_executable_script(helper_path, STEAM_HELPER_SCRIPT.to_string())?;
@@ -297,7 +330,6 @@ fn write_executable_script(path: PathBuf, contents: String) -> Result<(), io::Er
     Ok(())
 }
 
-///for running host commands with flatpak
 fn host_command(
     program: String,
     environment: Vec<(String, String)>,
@@ -340,7 +372,6 @@ fn attach_launch_log(
         command.stderr(Stdio::from(file));
     }
 }
-///parse env vars into real env vars
 pub fn parse_launch_environment(environment_text: String) -> Result<Vec<(String, String)>, String> {
     let mut environment = Vec::new();
     for (index, line) in environment_text.lines().enumerate() {
