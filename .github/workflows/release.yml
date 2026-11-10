@@ -64,12 +64,7 @@ jobs:
           files: staging/*
           name: Yakata ${{ github.ref_name }}
           body: |
-            ### What's new
+            ### Fixes
 
-            - Windows process tree tracking across game launchers and engine wrappers
-            - Locale Emulator (LEProc) support and Shift-JIS path detection
-            - Dark interface with responsive grid, custom dropdowns, and VNDB spoiler tags
-            - Two-column Add VN modal with live VNDB search preview
-            - Route progress tracking, novel notes, and Discord Rich Presence
-            - Blur filter for 18+ adult covers with reveal on hover
-            - NSIS installer and standalone portable zip builds
+            - Aligned notes edit button inline next to placeholder text to match tags style.
+            - Fixed button overlapping the Delete VN action and disappearing on hover.

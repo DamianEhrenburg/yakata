@@ -1820,27 +1820,42 @@ select option {
   padding: var(--space-3);
 }
 
-.desc-box,
-.notes-box {
+.desc-box {
   position: relative;
   min-width: 0;
   width: 100%;
+}
+
+.notes-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-bottom: var(--space-2);
 }
 
 .desc-box a {
   color: var(--link-text);
 }
 
-.desc-box.editing,
-.notes-box.editing {
+.desc-box.editing {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);
   background: var(--bg-panel);
   padding: 14px;
 }
 
-.detail-panel .desc-edit-button,
-.detail-panel .notes-edit-button {
+.notes-box.editing {
+  display: block;
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  padding: 14px;
+}
+
+.detail-panel .desc-edit-button {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -1866,12 +1881,51 @@ select option {
     border-color 0.16s ease;
 }
 
-.desc-box:hover .desc-edit-button,
-.desc-edit-button:focus,
-.notes-box:hover .notes-edit-button,
-.notes-edit-button:focus {
+/* Notes edit button: inline circular button right after text, matching tag-add-button */
+.detail-panel .notes-edit-button {
+  order: 2;
+  position: static;
+  width: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
   opacity: 1;
   pointer-events: auto;
+  cursor: pointer;
+  transition:
+    opacity 0.16s ease,
+    color 0.16s ease,
+    border-color 0.16s ease,
+    background 0.16s ease;
+}
+
+.notes-box.editing .notes-edit-button {
+  display: none;
+}
+
+.desc-box:hover .desc-edit-button,
+.desc-edit-button:focus {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.notes-box:hover .notes-edit-button,
+.notes-edit-button:focus,
+.detail-panel .notes-edit-button:hover {
+  opacity: 1;
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .detail-panel .desc-edit-button:hover,
@@ -1881,8 +1935,7 @@ select option {
   background: var(--accent-soft);
 }
 
-.detail-desc,
-.notes-text {
+.detail-desc {
   width: 100%;
   margin: 0;
   padding-right: 42px;
@@ -1891,9 +1944,23 @@ select option {
   overflow-wrap: anywhere;
 }
 
-.detail-desc.empty,
-.notes-text.empty {
+.notes-box .notes-text {
+  order: 1;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  line-height: 1.5;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.detail-desc.empty {
   color: var(--muted-2);
+}
+
+.notes-box .notes-text.empty {
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .detail-desc-input {

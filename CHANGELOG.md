@@ -2,6 +2,11 @@
 
 All notable changes to Yakata are documented here.
 
+## [0.2.1] - 2026-11-10
+
+### Fixed
+- Detail panel: aligned notes edit button inline next to placeholder text to match tags style and prevent overlap with delete button.
+
 ## [0.2.0] - 2026-11-03
 
 ### Added
