@@ -13,6 +13,7 @@ pub struct NewVN {
     pub vndb_id: Option<String>,
     pub status: Option<NovelStatus>,
     pub rating: Option<u8>,
+    pub is_nsfw: bool,
 }
 
 #[component]
@@ -33,6 +34,7 @@ pub fn AddVnForm(
     let current_tags_text = tags_text.read().clone();
     let mut selected_status = use_signal(|| Some(NovelStatus::PlanToRead));
     let mut selected_rating = use_signal(|| None::<u8>);
+    let mut loaded_is_nsfw = use_signal(|| false);
     let mut vndb_query = use_signal(String::new);
     let mut search_results: Signal<Vec<VndbSearchResult>> = use_signal(Vec::new);
     let mut search_message = use_signal(String::new);
@@ -41,23 +43,10 @@ pub fn AddVnForm(
     let message_text = search_message.read().clone();
     let results_to_show = search_results.read().clone();
 
-    let status_options = vec![
-        DropdownOption::new("plan_to_read", "Plan to Read"),
-        DropdownOption::new("reading", "Reading"),
-        DropdownOption::new("completed", "Completed"),
-        DropdownOption::new("on_hold", "On Hold"),
-        DropdownOption::new("dropped", "Dropped"),
-        DropdownOption::new("none", "No status"),
-    ];
+    let mut status_options = vec![DropdownOption::new("none", "No status")];
+    status_options.extend(NovelStatus::all().iter().map(|s| DropdownOption::new(s.key(), s.as_str())));
 
-    let current_status_val = match *selected_status.read() {
-        Some(NovelStatus::Reading) => "reading",
-        Some(NovelStatus::Completed) => "completed",
-        Some(NovelStatus::PlanToRead) => "plan_to_read",
-        Some(NovelStatus::OnHold) => "on_hold",
-        Some(NovelStatus::Dropped) => "dropped",
-        None => "none",
-    }.to_string();
+    let current_status_val = (*selected_status.read()).map(|s| s.key()).unwrap_or("none").to_string();
 
     let score_options = vec![
         DropdownOption::new("none", "No score"),
@@ -128,15 +117,7 @@ pub fn AddVnForm(
                                 options: status_options,
                                 selected_value: current_status_val,
                                 on_select: move |val: String| {
-                                    let status = match val.as_str() {
-                                        "reading" => Some(NovelStatus::Reading),
-                                        "completed" => Some(NovelStatus::Completed),
-                                        "plan_to_read" => Some(NovelStatus::PlanToRead),
-                                        "on_hold" => Some(NovelStatus::OnHold),
-                                        "dropped" => Some(NovelStatus::Dropped),
-                                        _ => None,
-                                    };
-                                    selected_status.set(status);
+                                    selected_status.set(NovelStatus::from_key(&val));
                                 },
                             }
                         }
@@ -225,12 +206,14 @@ pub fn AddVnForm(
                                     vndb_id: loaded_result_id.read().clone(),
                                     status: *selected_status.read(),
                                     rating: *selected_rating.read(),
+                                    is_nsfw: *loaded_is_nsfw.read(),
                                 });
                             title.set(String::new());
                             description.set(String::new());
                             cover_path.set(None);
                             cover_url.set(None);
                             loaded_result_id.set(None);
+                            loaded_is_nsfw.set(false);
                             tags_text.set(String::new());
                             selected_rating.set(None);
                         },
@@ -363,6 +346,7 @@ pub fn AddVnForm(
                                                             tags_text.set(current);
                                                         }
                                                     }
+                                                    loaded_is_nsfw.set(is_nsfw);
                                                     loaded_result_id.set(Some(result_id.clone()));
                                                     search_message.set(format!("Loaded {}.", result_title));
                                                 },

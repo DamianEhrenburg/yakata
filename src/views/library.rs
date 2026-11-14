@@ -114,28 +114,23 @@ fn VnCover(vn: VisualNovel, blur: bool) -> Element {
 }
 
 pub fn is_vn_nsfw(vn: &VisualNovel) -> bool {
-    let has_nsfw_text = |s: &str| {
-        let lower = s.to_lowercase();
-        lower.contains("18+")
-            || lower.contains("eroge")
-            || lower.contains("nukige")
-            || lower.contains("hentai")
-            || lower.contains("sexual")
-            || lower.contains("nsfw")
-            || lower.contains("adult")
+    if vn.is_nsfw {
+        return true;
+    }
+    let has_nsfw_tag = |s: &str| {
+        let lower = s.trim().to_lowercase();
+        lower == "18+"
+            || lower == "nsfw"
+            || lower == "eroge"
+            || lower == "nukige"
+            || lower == "hentai"
+            || lower == "adult"
     };
-    if vn.tags.iter().any(|t| has_nsfw_text(t)) {
+    if vn.tags.iter().any(|t| has_nsfw_tag(t)) {
         return true;
     }
-    if has_nsfw_text(&vn.title) {
-        return true;
-    }
-    if let Some(ref desc) = vn.description {
-        if has_nsfw_text(desc) {
-            return true;
-        }
-    }
-    false
+    let lower_title = vn.title.to_lowercase();
+    lower_title.contains("18+") || lower_title.contains("nsfw")
 }
 
 pub fn cover_source(vn: VisualNovel) -> Option<String> {
@@ -166,5 +161,30 @@ fn image_mime_type(path: &str) -> &'static str {
         "image/webp"
     } else {
         "image/jpeg"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_vn_nsfw() {
+        let clean = VisualNovel {
+            title: "Young Adult Story".to_string(),
+            description: Some("A young adult drama about growing up.".to_string()),
+            tags: vec!["Drama".to_string(), "Romance".to_string()],
+            ..Default::default()
+        };
+        assert!(!is_vn_nsfw(&clean));
+
+        let flag_nsfw = VisualNovel { is_nsfw: true, ..Default::default() };
+        assert!(is_vn_nsfw(&flag_nsfw));
+
+        let tag_nsfw = VisualNovel { tags: vec!["Eroge".to_string()], ..Default::default() };
+        assert!(is_vn_nsfw(&tag_nsfw));
+
+        let title_nsfw = VisualNovel { title: "Title 18+".to_string(), ..Default::default() };
+        assert!(is_vn_nsfw(&title_nsfw));
     }
 }

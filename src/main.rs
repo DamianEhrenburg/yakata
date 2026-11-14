@@ -120,7 +120,12 @@ fn App() -> Element {
     };
 
     let saved_library_sort_mode = saved_settings.library_sort_mode.clone();
-    let saved_library_filter_mode = saved_settings.library_filter_mode.clone();
+    let saved_favourites_only = saved_settings.filter_favourites_only
+        || matches!(saved_settings.library_filter_mode, LibraryFilterMode::Favourites);
+    let saved_status_filter = saved_settings.filter_status.or(match saved_settings.library_filter_mode {
+        LibraryFilterMode::Status(status) => Some(status),
+        _ => None,
+    });
 
     let mut selected_tag_filter = use_signal(|| None::<String>);
     let selected_tag = selected_tag_filter.read().clone();
@@ -133,8 +138,11 @@ fn App() -> Element {
     let mut library_sort_mode = use_signal(|| saved_library_sort_mode);
     let selected_sort_mode = library_sort_mode.read().clone();
 
-    let mut library_filter_mode = use_signal(|| saved_library_filter_mode);
-    let selected_filter_mode = library_filter_mode.read().clone();
+    let mut favourites_only = use_signal(|| saved_favourites_only);
+    let is_favourites_only = *favourites_only.read();
+
+    let mut selected_status_filter = use_signal(|| saved_status_filter);
+    let current_status_filter = *selected_status_filter.read();
 
     let umu_is_available = use_hook(umu_launcher_is_available);
 
@@ -196,11 +204,11 @@ fn App() -> Element {
         .filter(|vn| {
             let matches_search = vn.title.to_lowercase().contains(&search_text);
 
-            let matches_filter = match selected_filter_mode {
-                LibraryFilterMode::All => true,
-                LibraryFilterMode::Favourites => vn.is_favourite,
-                LibraryFilterMode::Status(status) => vn.status == Some(status),
-            };
+            let matches_filter = (!is_favourites_only || vn.is_favourite)
+                && match current_status_filter {
+                    Some(status) => vn.status == Some(status),
+                    None => true,
+                };
 
             let matches_tag = match selected_tag.clone() {
                 Some(tag) => vn
@@ -463,13 +471,12 @@ fn App() -> Element {
 
                                 div { class: "topbar-segmented-control",
                                     button {
-                                        class: if !matches!(selected_filter_mode, LibraryFilterMode::Favourites) { "topbar-segment active" } else { "topbar-segment" },
+                                        class: if !is_favourites_only { "topbar-segment active" } else { "topbar-segment" },
 
                                         onclick: move |_| {
-                                            let filter_mode = LibraryFilterMode::All;
-
-                                            library_filter_mode.set(filter_mode.clone());
-                                            settings.write().library_filter_mode = filter_mode;
+                                            favourites_only.set(false);
+                                            settings.write().filter_favourites_only = false;
+                                            settings.write().library_filter_mode = LibraryFilterMode::All;
                                             save_settings_or_log(&settings);
                                         },
 
@@ -477,13 +484,11 @@ fn App() -> Element {
                                     }
 
                                     button {
-                                        class: if matches!(selected_filter_mode, LibraryFilterMode::Favourites) { "topbar-segment active" } else { "topbar-segment" },
+                                        class: if is_favourites_only { "topbar-segment active" } else { "topbar-segment" },
 
                                         onclick: move |_| {
-                                            let filter_mode = LibraryFilterMode::Favourites;
-
-                                            library_filter_mode.set(filter_mode.clone());
-                                            settings.write().library_filter_mode = filter_mode;
+                                            favourites_only.set(true);
+                                            settings.write().filter_favourites_only = true;
                                             save_settings_or_log(&settings);
                                         },
 
@@ -496,34 +501,19 @@ fn App() -> Element {
                                 span { class: "topbar-select-label", "Status" }
 
                                 Dropdown {
-                                    options: vec![
-                                        DropdownOption::new("all", "All Statuses"),
-                                        DropdownOption::new("reading", "Reading"),
-                                        DropdownOption::new("completed", "Completed"),
-                                        DropdownOption::new("plan_to_read", "Plan to Read"),
-                                        DropdownOption::new("on_hold", "On Hold"),
-                                        DropdownOption::new("dropped", "Dropped"),
-                                    ],
-                                    selected_value: match selected_filter_mode {
-                                        LibraryFilterMode::Status(NovelStatus::Reading) => "reading",
-                                        LibraryFilterMode::Status(NovelStatus::Completed) => "completed",
-                                        LibraryFilterMode::Status(NovelStatus::PlanToRead) => "plan_to_read",
-                                        LibraryFilterMode::Status(NovelStatus::OnHold) => "on_hold",
-                                        LibraryFilterMode::Status(NovelStatus::Dropped) => "dropped",
-                                        _ => "all",
-                                    }.to_string(),
+                                    options: {
+                                        let mut opts = vec![DropdownOption::new("all", "All Statuses")];
+                                        opts.extend(NovelStatus::all().iter().map(|s| DropdownOption::new(s.key(), s.as_str())));
+                                        opts
+                                    },
+                                    selected_value: current_status_filter
+                                        .map(|s| s.key())
+                                        .unwrap_or("all")
+                                        .to_string(),
                                     on_select: move |val: String| {
-                                        let filter_mode = match val.as_str() {
-                                            "reading" => LibraryFilterMode::Status(NovelStatus::Reading),
-                                            "completed" => LibraryFilterMode::Status(NovelStatus::Completed),
-                                            "plan_to_read" => LibraryFilterMode::Status(NovelStatus::PlanToRead),
-                                            "on_hold" => LibraryFilterMode::Status(NovelStatus::OnHold),
-                                            "dropped" => LibraryFilterMode::Status(NovelStatus::Dropped),
-                                            _ => LibraryFilterMode::All,
-                                        };
-
-                                        library_filter_mode.set(filter_mode.clone());
-                                        settings.write().library_filter_mode = filter_mode;
+                                        let status_filter = NovelStatus::from_key(&val);
+                                        selected_status_filter.set(status_filter);
+                                        settings.write().filter_status = status_filter;
                                         save_settings_or_log(&settings);
                                     },
                                 }
@@ -632,6 +622,7 @@ fn App() -> Element {
                                                         vndb_id: new_vn.vndb_id,
                                                         game_folder: None,
                                                         run_with_locale_emulator: false,
+                                                        is_nsfw: new_vn.is_nsfw,
                                                     };
 
                                                     vns.write().push(new_vn);
@@ -870,11 +861,6 @@ fn App() -> Element {
 
                                                                             }),
                                                                         );
-                                                                    let mut notif_signal = notification;
-                                                                    spawn(async move {
-                                                                        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
-                                                                        notif_signal.set(None);
-                                                                    });
                                                                     let discord_presence = if settings
                                                                         .read()
                                                                         .discord_rich_presence_enabled
@@ -1080,11 +1066,6 @@ fn App() -> Element {
                                                                 message: "Tool launched.".to_string(),
                                                             }),
                                                         );
-                                                    let mut notif_signal = notification;
-                                                    spawn(async move {
-                                                        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
-                                                        notif_signal.set(None);
-                                                    });
                                                     thread::spawn(move || {
                                                         if let Err(error) = child.wait() {
                                                             println!("Could not wait for tool process: {error}");

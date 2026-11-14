@@ -36,7 +36,6 @@ Yakata is a desktop visual novel launcher and tracker for Windows. It catalogs y
 - Read synopses with expandable spoiler blocks
 - Track total playtime and session logs across child processes and engine wrappers
 - Launch Japanese titles with Locale Emulator (LEProc) directly from the app
-- Auto-detect Shift-JIS and UTF-8 folder paths for older visual novels
 - Filter and sort by reading status, 10-point personal score, favourites, and tags
 - Track story routes, playtime sessions, and personal notes
 - Discord Rich Presence with game status, route, and elapsed playtime

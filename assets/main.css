@@ -1909,6 +1909,7 @@ select option {
     background 0.16s ease;
 }
 
+.desc-box.editing .desc-edit-button,
 .notes-box.editing .notes-edit-button {
   display: none;
 }
@@ -1942,6 +1943,7 @@ select option {
   line-height: 1.5;
   color: var(--text);
   overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .notes-box .notes-text {

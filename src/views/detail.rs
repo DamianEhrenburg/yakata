@@ -215,32 +215,14 @@ pub fn DetailView(
                         div { class: "detail-tracker-field",
                             label { "Status" }
                             Dropdown {
-                                options: vec![
-                                    DropdownOption::new("none", "No status"),
-                                    DropdownOption::new("reading", "Reading"),
-                                    DropdownOption::new("completed", "Completed"),
-                                    DropdownOption::new("plan_to_read", "Plan to Read"),
-                                    DropdownOption::new("on_hold", "On Hold"),
-                                    DropdownOption::new("dropped", "Dropped"),
-                                ],
-                                selected_value: match vn.status {
-                                    Some(NovelStatus::Reading) => "reading",
-                                    Some(NovelStatus::Completed) => "completed",
-                                    Some(NovelStatus::PlanToRead) => "plan_to_read",
-                                    Some(NovelStatus::OnHold) => "on_hold",
-                                    Some(NovelStatus::Dropped) => "dropped",
-                                    None => "none",
-                                }.to_string(),
+                                options: {
+                                    let mut opts = vec![DropdownOption::new("none", "No status")];
+                                    opts.extend(NovelStatus::all().iter().map(|s| DropdownOption::new(s.key(), s.as_str())));
+                                    opts
+                                },
+                                selected_value: vn.status.map(|s| s.key()).unwrap_or("none").to_string(),
                                 on_select: move |val: String| {
-                                    let status = match val.as_str() {
-                                        "reading" => Some(NovelStatus::Reading),
-                                        "completed" => Some(NovelStatus::Completed),
-                                        "plan_to_read" => Some(NovelStatus::PlanToRead),
-                                        "on_hold" => Some(NovelStatus::OnHold),
-                                        "dropped" => Some(NovelStatus::Dropped),
-                                        _ => None,
-                                    };
-                                    on_status_change.call((vn.id, status));
+                                    on_status_change.call((vn.id, NovelStatus::from_key(&val)));
                                 },
                             }
                         }
@@ -376,40 +358,38 @@ pub fn DetailView(
                             }
                         }
                     }
-                    if let Some(_description) = vn.description.clone() {
-                        h3 { "Description" }
-                        div { class: if *description_is_editing.read() { "desc-box editing" } else { "desc-box" },
-                            button {
-                                class: "desc-edit-button",
-                                title: "Edit Description",
-                                onclick: move |_| {
-                                    let next_value = !*description_is_editing.read();
-                                    if next_value {
-                                        description_draft.set(vn.description.clone().unwrap_or_default());
-                                    }
-                                    description_is_editing.set(next_value);
-                                },
-                                "✎"
-                            }
-                            if *description_is_editing.read() {
-                                textarea {
-                                    class: "detail-desc-input",
-                                    value: "{description_value}",
-                                    oninput: move |event| {
-                                        description_draft.set(event.value());
-                                    },
-                                    onblur: move |_| {
-                                        on_description_change.call((vn.id, description_draft.read().clone()));
-                                        description_is_editing.set(false);
-                                    },
+                    h3 { "Description" }
+                    div { class: if *description_is_editing.read() { "desc-box editing" } else { "desc-box" },
+                        button {
+                            class: "desc-edit-button",
+                            title: "Edit Description",
+                            onclick: move |_| {
+                                let next_value = !*description_is_editing.read();
+                                if next_value {
+                                    description_draft.set(vn.description.clone().unwrap_or_default());
                                 }
-                            } else if saved_description.is_empty() {
-                                div { class: "detail-desc empty", "No description yet." }
-                            } else {
-                                div { class: "detail-desc",
-                                    for part in description_parts {
-                                        DescriptionPartView { part }
-                                    }
+                                description_is_editing.set(next_value);
+                            },
+                            "✎"
+                        }
+                        if *description_is_editing.read() {
+                            textarea {
+                                class: "detail-desc-input",
+                                value: "{description_value}",
+                                oninput: move |event| {
+                                    description_draft.set(event.value());
+                                },
+                                onblur: move |_| {
+                                    on_description_change.call((vn.id, description_draft.read().clone()));
+                                    description_is_editing.set(false);
+                                },
+                            }
+                        } else if saved_description.is_empty() {
+                            div { class: "detail-desc empty", "No description yet." }
+                        } else {
+                            div { class: "detail-desc",
+                                for part in description_parts {
+                                    DescriptionPartView { part }
                                 }
                             }
                         }

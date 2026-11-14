@@ -28,15 +28,35 @@ pub enum NovelStatus {
     Dropped,
 }
 
-#[allow(dead_code)]
 impl NovelStatus {
     pub fn as_str(&self) -> &'static str {
         match self {
             NovelStatus::Reading => "Reading",
             NovelStatus::Completed => "Completed",
-            NovelStatus::PlanToRead => "Plan to read",
-            NovelStatus::OnHold => "On hold",
+            NovelStatus::PlanToRead => "Plan to Read",
+            NovelStatus::OnHold => "On Hold",
             NovelStatus::Dropped => "Dropped",
+        }
+    }
+
+    pub fn key(&self) -> &'static str {
+        match self {
+            NovelStatus::Reading => "reading",
+            NovelStatus::Completed => "completed",
+            NovelStatus::PlanToRead => "plan_to_read",
+            NovelStatus::OnHold => "on_hold",
+            NovelStatus::Dropped => "dropped",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        match key {
+            "reading" => Some(NovelStatus::Reading),
+            "completed" => Some(NovelStatus::Completed),
+            "plan_to_read" => Some(NovelStatus::PlanToRead),
+            "on_hold" => Some(NovelStatus::OnHold),
+            "dropped" => Some(NovelStatus::Dropped),
+            _ => None,
         }
     }
 
@@ -98,6 +118,42 @@ pub struct VisualNovel {
     pub vndb_id: Option<String>,
     #[serde(default)]
     pub run_with_locale_emulator: bool,
+    #[serde(default)]
+    pub is_nsfw: bool,
+}
+
+impl Default for VisualNovel {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            title: String::new(),
+            cover_url: None,
+            cover_path: None,
+            description: None,
+            is_favourite: false,
+            tags: Vec::new(),
+            executable_path: None,
+            game_folder: None,
+            launch_mode: LaunchMode::default(),
+            steam_app_id: None,
+            wine_binary: None,
+            wine_prefix: None,
+            wine_locale: None,
+            proton_path: None,
+            umu_game_id: default_umu_game_id(),
+            launch_arguments: String::new(),
+            launch_environment: String::new(),
+            notes: String::new(),
+            routes: Vec::new(),
+            active_route: None,
+            play_sessions: Vec::new(),
+            status: None,
+            rating: None,
+            vndb_id: None,
+            run_with_locale_emulator: false,
+            is_nsfw: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -170,7 +226,7 @@ pub struct AppSettings {
     pub discord_custom_cover_url: String,
     #[serde(default)]
     pub library_sort_mode: LibrarySortMode,
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub library_filter_mode: LibraryFilterMode,
     #[serde(default)]
     pub custom_background_path: Option<String>,
@@ -178,6 +234,10 @@ pub struct AppSettings {
     pub leproc_path: Option<String>,
     #[serde(default)]
     pub blur_nsfw: bool,
+    #[serde(default)]
+    pub filter_favourites_only: bool,
+    #[serde(default)]
+    pub filter_status: Option<NovelStatus>,
 }
 
 fn default_discord_status_text() -> String {
@@ -196,6 +256,8 @@ impl Default for AppSettings {
             custom_background_path: None,
             leproc_path: None,
             blur_nsfw: false,
+            filter_favourites_only: false,
+            filter_status: None,
         }
     }
 }
@@ -211,9 +273,21 @@ mod tests {
         assert_eq!(all.len(), 5);
         assert_eq!(NovelStatus::Reading.as_str(), "Reading");
         assert_eq!(NovelStatus::Completed.as_str(), "Completed");
-        assert_eq!(NovelStatus::PlanToRead.as_str(), "Plan to read");
-        assert_eq!(NovelStatus::OnHold.as_str(), "On hold");
+        assert_eq!(NovelStatus::PlanToRead.as_str(), "Plan to Read");
+        assert_eq!(NovelStatus::OnHold.as_str(), "On Hold");
         assert_eq!(NovelStatus::Dropped.as_str(), "Dropped");
+        for status in all {
+            assert_eq!(NovelStatus::from_key(status.key()), Some(*status));
+        }
+    }
+
+    #[test]
+    fn test_skip_serializing_old_filter_mode() {
+        let settings = AppSettings::default();
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(!json.contains("library_filter_mode"));
+        assert!(json.contains("filter_favourites_only"));
+        assert!(json.contains("filter_status"));
     }
 
     #[test]
@@ -230,6 +304,23 @@ mod tests {
         assert!(!settings.blur_nsfw);
         assert!(settings.custom_background_path.is_none());
         assert!(settings.leproc_path.is_none());
+        assert!(!settings.filter_favourites_only);
+        assert!(settings.filter_status.is_none());
+    }
+
+    #[test]
+    fn test_backwards_compatibility_settings_without_new_filters() {
+        let old_json = r#"{
+            "discord_rich_presence_enabled": true,
+            "discord_status_text": "Reading",
+            "discord_show_active_route": true,
+            "discord_custom_cover_url": "",
+            "library_sort_mode": "Added",
+            "library_filter_mode": "All"
+        }"#;
+        let settings: AppSettings = serde_json::from_str(old_json).expect("Failed to deserialize old settings");
+        assert!(!settings.filter_favourites_only);
+        assert!(settings.filter_status.is_none());
     }
 
     #[test]
