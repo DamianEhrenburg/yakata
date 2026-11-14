@@ -6,8 +6,13 @@ use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 const STARTUP_GRACE: Duration = Duration::from_secs(10);
+const STEAM_STARTUP_GRACE: Duration = Duration::from_secs(35);
 
-pub fn wait_for_game_exit(mut child: Child, game_folder: Option<PathBuf>) -> Result<Instant, io::Error> {
+pub fn wait_for_game_exit(
+    mut child: Child,
+    game_folder: Option<PathBuf>,
+    is_steam: bool,
+) -> Result<Instant, io::Error> {
     child.wait()?;
     let child_exited_at = Instant::now();
     let Some(game_folder) = game_folder else {
@@ -17,13 +22,18 @@ pub fn wait_for_game_exit(mut child: Child, game_folder: Option<PathBuf>) -> Res
     if folder.is_empty() {
         return Ok(child_exited_at);
     }
+    let startup_grace = if is_steam {
+        STEAM_STARTUP_GRACE
+    } else {
+        STARTUP_GRACE
+    };
     let mut last_seen = child_exited_at;
     let mut seen_game_process = false;
     loop {
         if game_process_running(&folder) {
             seen_game_process = true;
             last_seen = Instant::now();
-        } else if seen_game_process || child_exited_at.elapsed() >= STARTUP_GRACE {
+        } else if seen_game_process || child_exited_at.elapsed() >= startup_grace {
             return Ok(last_seen);
         }
         thread::sleep(POLL_INTERVAL);

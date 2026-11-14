@@ -36,7 +36,7 @@ pub fn SettingsView(
                     if let Some(ref path) = custom_background_path {
                         code { class: "setting-path", "{path}" }
                     } else {
-                        span { class: "setting-help", "Default stars wallpaper" }
+                        span { class: "setting-help", "Default Yakata wallpaper" }
                     }
                 }
                 div { class: "setting-button-row",
@@ -65,6 +65,7 @@ pub fn SettingsView(
                 div { class: "setting-row",
                     label { class: "locale-emulator-checkbox-label",
                         input {
+                            class: "setting-checkbox",
                             r#type: "checkbox",
                             checked: blur_nsfw,
                             onchange: move |event| {
@@ -186,6 +187,7 @@ pub fn SettingsView(
                         "Import Library (JSON)"
                     }
                 }
+                p { class: "setting-help", "Exports or restores a Yakata/Kakera library backup (library_json). Importing replaces your current library." }
                 div { class: "setting-button-row",
                     button {
                         class: "fp-button",

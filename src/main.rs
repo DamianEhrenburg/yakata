@@ -783,181 +783,174 @@ fn App() -> Element {
                                                 .find(|vn| vn.id == id)
                                                 .cloned();
 
-                                            match vn {
-                                                Some(vn) => {
-                                                    let presence_vn = vn.clone();
+                                            let Some(vn) = vn else {
+                                                notification.set(Some(AppNotification {
+                                                    level: NotificationLevel::Error,
+                                                    message: format!("Could not find VN with id {id}."),
+                                                }));
+                                                return;
+                                            };
 
-                                                    match vn.executable_path {
-                                                        Some(path) => {
-                                                            if vn.launch_mode == LaunchMode::Proton
-                                                                && !umu_launcher_is_available()
-                                                            {
-                                                                notification
-                                                                    .set(
-                                                                        Some(AppNotification {
-                                                                            level: NotificationLevel::Error,
-                                                                            message: "Could not launch VN: UMU Launcher was not found. Install umu-launcher to run games with Proton."
-                                                                                .to_string(),
-                                                                        }),
-                                                                    );
-                                                                return;
-                                                            }
-                                                            let launch_log_path = match new_launch_log_path(
-                                                                vn.id,
-                                                                vn.title.clone(),
-                                                            ) {
-                                                                Ok(path) => Some(path),
-                                                                Err(error) => {
-                                                                    notification
-                                                                        .set(
-                                                                            Some(AppNotification {
-                                                                                level: NotificationLevel::Warning,
-                                                                                message: format!("Could not create launch log: {error}"),
-                                                                            }),
-                                                                        );
-                                                                    None
-                                                                }
-                                                            };
-                                                            let launch_environment = match parse_launch_environment(
-                                                                vn.launch_environment.clone(),
-                                                            ) {
-                                                                Ok(environment) => environment,
-                                                                Err(error) => {
-                                                                    notification
-                                                                        .set(
-                                                                            Some(AppNotification {
-                                                                                level: NotificationLevel::Error,
-                                                                                message: format!("Could not launch VN: {error}"),
-                                                                            }),
-                                                                        );
-                                                                    return;
-                                                                }
-                                                            };
+                                            let presence_vn = vn.clone();
 
-                                                            let game_folder = game_process::game_folder_for(vn.game_folder.as_deref(), &path);
+                                            if vn.launch_mode == LaunchMode::Steam && vn.steam_app_id.is_none() {
+                                                notification.set(Some(AppNotification {
+                                                    level: NotificationLevel::Error,
+                                                    message: "Steam App ID is not configured.".to_string(),
+                                                }));
+                                                return;
+                                            }
 
-                                                            match launch_executable(
-                                                                path,
-                                                                vn.launch_mode,
-                                                                vn.steam_app_id,
-                                                                vn.wine_binary,
-                                                                vn.wine_prefix,
-                                                                vn.wine_locale,
-                                                                vn.proton_path,
-                                                                vn.umu_game_id,
-                                                                vn.launch_arguments,
-                                                                launch_environment,
-                                                                launch_log_path.clone(),
-                                                                vn.run_with_locale_emulator,
-                                                                settings.read().leproc_path.clone(),
-                                                            ) {
-                                                                Ok(child) => {
-                                                                    let started_time = Utc::now();
-                                                                    let started_at = started_time.to_rfc3339();
-                                                                    let started_timer = Instant::now();
-                                                                    let vn_id = presence_vn.id;
-                                                                    notification
-                                                                        .set(
-                                                                            Some(AppNotification {
-                                                                                level: NotificationLevel::Info,
-                                                                                message: format!("Launched {}.", presence_vn.title),
+                                            if vn.launch_mode != LaunchMode::Steam && vn.executable_path.is_none() {
+                                                notification.set(Some(AppNotification {
+                                                    level: NotificationLevel::Warning,
+                                                    message: "No executable path saved for this VN.".to_string(),
+                                                }));
+                                                return;
+                                            }
 
-                                                                            }),
-                                                                        );
-                                                                    let discord_presence = if settings
-                                                                        .read()
-                                                                        .discord_rich_presence_enabled
-                                                                    {
-                                                                        match DiscordPresence::start_for_vn(
-                                                                            &presence_vn,
-                                                                            started_time,
-                                                                            settings.read().clone(),
-                                                                        ) {
-                                                                            Ok(presence) => Some(presence),
-                                                                            Err(error) => {
-                                                                                println!("Could not start Discord Rich Presence: {error}");
-                                                                                None
-                                                                            }
-                                                                        }
-                                                                    } else {
-                                                                        None
-                                                                    };
-                                                                    let thread_session_tx = session_tx.clone();
-                                                                    thread::spawn(move || {
-                                                                        let wait_result = game_process::wait_for_game_exit(child, game_folder);
-                                                                        if let Some(log_path) = launch_log_path {
-                                                                            if let Err(error) = update_latest_launch_log(&log_path) {
-                                                                                println!("Could not update latest launch log: {error}");
-                                                                            }
-                                                                        }
-                                                                        match wait_result {
-                                                                            Ok(last_seen_running) => {
-                                                                                let duration_seconds = last_seen_running
-                                                                                    .duration_since(started_timer)
-                                                                                    .as_secs();
-                                                                                let play_session = PlaySession {
-                                                                                    vn_id,
-                                                                                    started_at: started_at.clone(),
-                                                                                    duration_seconds,
-                                                                                    notes: None,
-                                                                                };
-                                                                                let save_result = add_play_session_to_library(
-                                                                                    vn_id,
-                                                                                    play_session.clone(),
-                                                                                );
-                                                                                match save_result {
-                                                                                    Ok(()) => {
-                                                                                        println!(
-                                                                                            "VN {vn_id} closed after {duration_seconds} seconds and was saved.",
-                                                                                        );
-                                                                                        let _ = thread_session_tx.send((vn_id, play_session));
-                                                                                    }
-                                                                                    Err(error) => {
-                                                                                        println!("Could not save measured play session: {error}");
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                            Err(error) => {
-                                                                                println!("Could not monitor VN process: {error}");
-                                                                            }
-                                                                        }
-                                                                        if let Some(presence) = discord_presence {
-                                                                            if let Err(error) = presence.clear() {
-                                                                                println!("Could not clear Discord Rich Presence: {error}");
-                                                                            }
-                                                                        }
-                                                                    });
-                                                                }
-                                                                Err(error) => {
-                                                                    notification
-                                                                        .set(
-                                                                            Some(AppNotification {
-                                                                                level: NotificationLevel::Error,
-                                                                                message: format!("Could not launch VN: {error}"),
-                                                                            }),
-                                                                        );
-                                                                }
-                                                            }
-                                                        }
-                                                        None => {
-                                                            notification
-                                                                .set(
-                                                                    Some(AppNotification {
-                                                                        level: NotificationLevel::Warning,
-                                                                        message: "No executable path saved for this VN.".to_string(),
-                                                                    }),
-                                                                );
-                                                        }
-                                                    }
+                                            if vn.launch_mode == LaunchMode::Proton && !umu_launcher_is_available() {
+                                                notification.set(Some(AppNotification {
+                                                    level: NotificationLevel::Error,
+                                                    message: "Could not launch VN: UMU Launcher was not found. Install umu-launcher to run games with Proton.".to_string(),
+                                                }));
+                                                return;
+                                            }
+
+                                            let launch_log_path = match new_launch_log_path(
+                                                vn.id,
+                                                vn.title.clone(),
+                                            ) {
+                                                Ok(path) => Some(path),
+                                                Err(error) => {
+                                                    notification.set(Some(AppNotification {
+                                                        level: NotificationLevel::Warning,
+                                                        message: format!("Could not create launch log: {error}"),
+                                                    }));
+                                                    None
                                                 }
-                                                None => {
-                                                    notification
-                                                        .set(
-                                                            Some(AppNotification {
-                                                                level: NotificationLevel::Error,
-                                                                message: format!("Could not find VN with id {id}."),
-                                                            }),
-                                                        );
+                                            };
+
+                                            let launch_environment = match parse_launch_environment(
+                                                vn.launch_environment.clone(),
+                                            ) {
+                                                Ok(environment) => environment,
+                                                Err(error) => {
+                                                    notification.set(Some(AppNotification {
+                                                        level: NotificationLevel::Error,
+                                                        message: format!("Could not launch VN: {error}"),
+                                                    }));
+                                                    return;
+                                                }
+                                            };
+
+                                            let game_folder = vn
+                                                .executable_path
+                                                .as_deref()
+                                                .and_then(|p| game_process::game_folder_for(vn.game_folder.as_deref(), p))
+                                                .or_else(|| {
+                                                    vn.game_folder
+                                                        .as_deref()
+                                                        .filter(|f| !f.trim().is_empty())
+                                                        .map(std::path::PathBuf::from)
+                                                });
+
+                                            let executable_path = vn.executable_path.clone().unwrap_or_default();
+                                            let is_steam = vn.launch_mode == LaunchMode::Steam;
+
+                                            match launch_executable(
+                                                executable_path,
+                                                vn.launch_mode,
+                                                vn.steam_app_id,
+                                                vn.wine_binary,
+                                                vn.wine_prefix,
+                                                vn.wine_locale,
+                                                vn.proton_path,
+                                                vn.umu_game_id,
+                                                vn.launch_arguments,
+                                                launch_environment,
+                                                launch_log_path.clone(),
+                                                vn.run_with_locale_emulator,
+                                                settings.read().leproc_path.clone(),
+                                            ) {
+                                                Ok(child) => {
+                                                    let started_time = Utc::now();
+                                                    let started_at = started_time.to_rfc3339();
+                                                    let started_timer = Instant::now();
+                                                    let vn_id = presence_vn.id;
+                                                    notification.set(Some(AppNotification {
+                                                        level: NotificationLevel::Info,
+                                                        message: format!("Launched {}.", presence_vn.title),
+                                                    }));
+                                                    let discord_presence = if settings
+                                                        .read()
+                                                        .discord_rich_presence_enabled
+                                                    {
+                                                        match DiscordPresence::start_for_vn(
+                                                            &presence_vn,
+                                                            started_time,
+                                                            settings.read().clone(),
+                                                        ) {
+                                                            Ok(presence) => Some(presence),
+                                                            Err(error) => {
+                                                                println!("Could not start Discord Rich Presence: {error}");
+                                                                None
+                                                            }
+                                                        }
+                                                    } else {
+                                                        None
+                                                    };
+                                                    let thread_session_tx = session_tx.clone();
+                                                    thread::spawn(move || {
+                                                        let wait_result = game_process::wait_for_game_exit(child, game_folder, is_steam);
+                                                        if let Some(log_path) = launch_log_path {
+                                                            if let Err(error) = update_latest_launch_log(&log_path) {
+                                                                println!("Could not update latest launch log: {error}");
+                                                            }
+                                                        }
+                                                        match wait_result {
+                                                            Ok(last_seen_running) => {
+                                                                let duration_seconds = last_seen_running
+                                                                    .duration_since(started_timer)
+                                                                    .as_secs();
+                                                                let play_session = PlaySession {
+                                                                    vn_id,
+                                                                    started_at: started_at.clone(),
+                                                                    duration_seconds,
+                                                                    notes: None,
+                                                                };
+                                                                let save_result = add_play_session_to_library(
+                                                                    vn_id,
+                                                                    play_session.clone(),
+                                                                );
+                                                                match save_result {
+                                                                    Ok(()) => {
+                                                                        println!(
+                                                                            "VN {vn_id} closed after {duration_seconds} seconds and was saved.",
+                                                                        );
+                                                                        let _ = thread_session_tx.send((vn_id, play_session));
+                                                                    }
+                                                                    Err(error) => {
+                                                                        println!("Could not save measured play session: {error}");
+                                                                    }
+                                                                }
+                                                            }
+                                                            Err(error) => {
+                                                                println!("Could not monitor VN process: {error}");
+                                                            }
+                                                        }
+                                                        if let Some(presence) = discord_presence {
+                                                            if let Err(error) = presence.clear() {
+                                                                println!("Could not clear Discord Rich Presence: {error}");
+                                                            }
+                                                        }
+                                                    });
+                                                }
+                                                Err(error) => {
+                                                    notification.set(Some(AppNotification {
+                                                        level: NotificationLevel::Error,
+                                                        message: format!("Could not launch VN: {error}"),
+                                                    }));
                                                 }
                                             }
                                         },
@@ -1023,12 +1016,19 @@ fn App() -> Element {
                                                 }
                                             };
                                             let launch_result = if vn.launch_mode == LaunchMode::Steam {
-                                                let Some(app_id) = vn.steam_app_id else {
-                                                    notification.set(Some(AppNotification {
-                                                        level: NotificationLevel::Error,
-                                                        message: "Could not run tool: Steam App ID is not configured.".to_string(),
-                                                    }));
-                                                    return;
+                                                let app_id = if cfg!(target_os = "windows") {
+                                                    vn.steam_app_id.unwrap_or(0)
+                                                } else {
+                                                    match vn.steam_app_id {
+                                                        Some(id) => id,
+                                                        None => {
+                                                            notification.set(Some(AppNotification {
+                                                                level: NotificationLevel::Error,
+                                                                message: "Could not run tool: Steam App ID is not configured.".to_string(),
+                                                            }));
+                                                            return;
+                                                        }
+                                                    }
                                                 };
                                                 launch_steam_tool(
                                                     tool_path,
@@ -1049,8 +1049,8 @@ fn App() -> Element {
                                                     vn.launch_arguments,
                                                     launch_environment,
                                                     launch_log_path,
-                                                    false,
-                                                    None,
+                                                    vn.run_with_locale_emulator,
+                                                    settings.read().leproc_path.clone(),
                                                 )
                                                 .map(ToolLaunch::Process)
                                             };
@@ -1099,7 +1099,7 @@ fn App() -> Element {
                                         },
 
                                         on_steam_app_id_change: move |(id, steam_app_id): (u64, String)| {
-                                            let steam_app_id = steam_app_id.parse::<u32>().ok();
+                                            let steam_app_id = launcher::parse_steam_app_id(&steam_app_id);
 
                                             update_vn_and_save(
                                                 &mut vns,
@@ -1543,6 +1543,7 @@ fn App() -> Element {
                                     match storage::import_library_backup(&path) {
                                         Ok(imported) => {
                                             *vns.write() = imported;
+                                            selected_vn_id.set(None);
                                             notification.set(Some(AppNotification {
                                                 level: NotificationLevel::Info,
                                                 message: "Library backup restored successfully.".to_string(),

@@ -112,6 +112,69 @@ pub fn detect_leproc_path() -> Option<String> {
     None
 }
 
+pub fn parse_steam_app_id(input: &str) -> Option<u32> {
+    let trimmed = input.trim();
+    if let Ok(id) = trimmed.parse::<u32>() {
+        return Some(id);
+    }
+    if let Some(pos) = trimmed.find("/app/") {
+        let after = &trimmed[pos + 5..];
+        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(id) = digits.parse::<u32>() {
+            return Some(id);
+        }
+    }
+    if let Some(pos) = trimmed.find("rungameid/") {
+        let after = &trimmed[pos + 10..];
+        let digits: String = after.chars().take_while(|c| c.is_ascii_digit()).collect();
+        if let Ok(id) = digits.parse::<u32>() {
+            return Some(id);
+        }
+    }
+    let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
+    digits.parse::<u32>().ok()
+}
+
+pub fn split_launch_arguments(input: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    for ch in input.chars() {
+        match quote {
+            Some(q) if ch == q => {
+                quote = None;
+            }
+            Some(_) => {
+                current.push(ch);
+            }
+            None if ch == '"' || ch == '\'' => {
+                quote = Some(ch);
+            }
+            None if ch.is_whitespace() => {
+                if !current.is_empty() {
+                    args.push(std::mem::take(&mut current));
+                }
+            }
+            None => {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.is_empty() {
+        args.push(current);
+    }
+    args
+}
+
+fn open_launch_log(log_path: Option<PathBuf>) -> io::Result<(Option<fs::File>, Option<fs::File>)> {
+    let Some(path) = log_path else {
+        return Ok((None, None));
+    };
+    let stdout_file = OpenOptions::new().create(true).append(true).open(&path)?;
+    let stderr_file = stdout_file.try_clone()?;
+    Ok((Some(stdout_file), Some(stderr_file)))
+}
+
 pub fn launch_executable(
     executable_path: String,
     launch_mode: LaunchMode,
@@ -129,22 +192,8 @@ pub fn launch_executable(
 ) -> Result<Child, io::Error> {
     let path = PathBuf::from(executable_path);
     let working_directory = path.parent().map(Path::to_path_buf);
-    let mut stdout_log = None;
-    let mut stderr_log = None;
-    if let Some(log_path) = launch_log_path {
-        stdout_log = Some(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)?,
-        );
-        stderr_log = Some(
-            OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)?,
-        );
-    }
+    let (stdout_log, stderr_log) = open_launch_log(launch_log_path)?;
+    let parsed_args = split_launch_arguments(&launch_arguments);
     let child: Child = match launch_mode {
         LaunchMode::Native => {
             let mut command = if cfg!(target_os = "windows") && run_with_locale_emulator {
@@ -154,7 +203,7 @@ pub fn launch_executable(
                 let mut cmd = host_command(leproc, launch_environment.clone(), working_directory.clone());
                 cmd.arg("-run");
                 cmd.arg(path.to_string_lossy().to_string());
-                cmd.args(launch_arguments.split_whitespace());
+                cmd.args(&parsed_args);
                 cmd
             } else {
                 let mut cmd = host_command(
@@ -162,7 +211,7 @@ pub fn launch_executable(
                     launch_environment.clone(),
                     working_directory.clone(),
                 );
-                cmd.args(launch_arguments.split_whitespace());
+                cmd.args(&parsed_args);
                 cmd
             };
             attach_launch_log(&mut command, stdout_log, stderr_log);
@@ -180,7 +229,7 @@ pub fn launch_executable(
             }
             let mut command = host_command(wine_command, environment, working_directory.clone());
             command.arg(path);
-            command.args(launch_arguments.split_whitespace());
+            command.args(&parsed_args);
             attach_launch_log(&mut command, stdout_log, stderr_log);
             command.spawn()?
         }
@@ -213,7 +262,7 @@ pub fn launch_executable(
                 host_command(umu_path, environment, working_directory)
             };
             command.arg(path);
-            command.args(launch_arguments.split_whitespace());
+            command.args(&parsed_args);
             attach_launch_log(&mut command, stdout_log, stderr_log);
             command.spawn()?
         }
@@ -262,23 +311,7 @@ pub fn launch_steam_tool(
     let working_directory = path.parent().map(Path::to_path_buf);
 
     if cfg!(target_os = "windows") {
-        let mut stdout_log = None;
-        let mut stderr_log = None;
-
-        if let Some(log_path) = launch_log_path {
-            stdout_log = Some(
-                OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&log_path)?,
-            );
-            stderr_log = Some(
-                OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(&log_path)?,
-            );
-        }
+        let (stdout_log, stderr_log) = open_launch_log(launch_log_path)?;
 
         let mut command = host_command(
             path.to_string_lossy().to_string(),
@@ -396,4 +429,32 @@ pub fn parse_launch_environment(environment_text: String) -> Result<Vec<(String,
         environment.push((name.to_string(), value.to_string()));
     }
     Ok(environment)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_steam_app_id() {
+        assert_eq!(parse_steam_app_id("1989270"), Some(1989270));
+        assert_eq!(
+            parse_steam_app_id("https://store.steampowered.com/app/1989270/Slay_the_Princess/"),
+            Some(1989270)
+        );
+        assert_eq!(
+            parse_steam_app_id("steam://rungameid/1989270"),
+            Some(1989270)
+        );
+        assert_eq!(parse_steam_app_id("e1989270"), Some(1989270));
+        assert_eq!(parse_steam_app_id("  412830  "), Some(412830));
+        assert_eq!(parse_steam_app_id(""), None);
+        assert_eq!(parse_steam_app_id("invalid"), None);
+    }
+
+    #[test]
+    fn test_split_launch_arguments() {
+        let args = split_launch_arguments("-foo \"bar baz\" 'qux quux' --flag");
+        assert_eq!(args, vec!["-foo", "bar baz", "qux quux", "--flag"]);
+    }
 }

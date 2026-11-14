@@ -530,6 +530,28 @@ pub fn DetailView(
                             }
                         }
                     }
+                    if vn.launch_mode == LaunchMode::Steam {
+                        label {
+                            "Steam App ID"
+                            input {
+                                r#type: "text",
+                                placeholder: "1989270 or Steam URL",
+                                value: "{steam_app_id_value}",
+                                oninput: move |event| {
+                                    steam_app_id_draft.set(event.value());
+                                },
+                                onblur: move |_| {
+                                    let parsed = crate::launcher::parse_steam_app_id(&steam_app_id_draft.read());
+                                    let normalized = parsed.map(|id| id.to_string()).unwrap_or_default();
+                                    steam_app_id_draft.set(normalized.clone());
+                                    on_steam_app_id_change.call((
+                                        vn.id,
+                                        normalized,
+                                    ));
+                                },
+                            }
+                        }
+                    }
                     if show_compatibility_settings {
                         button {
                             class: "launch-settings-toggle",
@@ -650,29 +672,6 @@ pub fn DetailView(
                                     }
                                 }
                                 if vn.launch_mode == LaunchMode::Steam {
-                                    label {
-                                        "Steam App ID"
-
-                                        input {
-                                            r#type: "number",
-                                            min: "1",
-                                            step: "1",
-                                            placeholder: "1961950",
-                                            value: "{steam_app_id_value}",
-
-                                            oninput: move |event| {
-                                                steam_app_id_draft.set(event.value());
-                                            },
-
-                                            onblur: move |_| {
-                                                on_steam_app_id_change.call((
-                                                    vn.id,
-                                                    steam_app_id_draft.read().clone(),
-                                                ));
-                                            },
-                                        }
-                                    }
-
                                     label {
                                         "Steam launch option"
 
@@ -898,7 +897,7 @@ pub fn DetailView(
                 }
             }
             div { class: "detail-launch-footer",
-                if vn.launch_mode != LaunchMode::Native {
+                if cfg!(target_os = "windows") || vn.launch_mode != LaunchMode::Native {
                     button {
                         class: "secondary-launch-button",
                         onclick: move |_| {
@@ -910,12 +909,20 @@ pub fn DetailView(
                                 on_run_tool.call((vn.id, path.to_string_lossy().to_string()));
                             }
                         },
-                        "Run .exe inside prefix"
+                        if cfg!(target_os = "windows") {
+                            "Run auxiliary .exe"
+                        } else {
+                            "Run .exe inside prefix"
+                        }
                     }
                 }
                 button {
                     class: "launch-button",
-                    disabled: vn.executable_path.is_none(),
+                    disabled: if vn.launch_mode == LaunchMode::Steam {
+                        vn.steam_app_id.is_none()
+                    } else {
+                        vn.executable_path.is_none()
+                    },
                     onclick: move |_| {
                         on_launch.call(vn.id);
                     },
