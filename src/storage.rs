@@ -1,6 +1,12 @@
 use crate::models::{AppSettings, VisualNovel};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::{fs, io};
+
+fn library_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
 
 pub fn yakata_data_dir() -> Result<PathBuf, io::Error> {
     let data_dir = match dirs::data_dir() {
@@ -28,7 +34,7 @@ pub fn library_file_path() -> Result<PathBuf, io::Error> {
     Ok(yakata_data_dir()?.join("library_json"))
 }
 
-pub fn load_library() -> Result<Vec<VisualNovel>, io::Error> {
+fn read_library_unlocked() -> Result<Vec<VisualNovel>, io::Error> {
     let library_file = library_file_path()?;
     let json_text = match fs::read_to_string(&library_file) {
         Ok(text) => text,
@@ -39,16 +45,11 @@ pub fn load_library() -> Result<Vec<VisualNovel>, io::Error> {
             return Err(error);
         }
     };
-    let library = match serde_json::from_str::<Vec<VisualNovel>>(&json_text) {
-        Ok(vns) => vns,
-        Err(error) => {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, error));
-        }
-    };
-    Ok(library)
+    serde_json::from_str::<Vec<VisualNovel>>(&json_text)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
-pub fn save_library(library: Vec<VisualNovel>) -> Result<(), io::Error> {
+fn write_library_unlocked(library: &[VisualNovel]) -> Result<(), io::Error> {
     let library_file = library_file_path()?;
     let library_dir = match library_file.parent() {
         Some(path) => path,
@@ -60,13 +61,26 @@ pub fn save_library(library: Vec<VisualNovel>) -> Result<(), io::Error> {
         }
     };
     fs::create_dir_all(library_dir)?;
-    let json_text = serde_json::to_string_pretty(&library)?;
-    fs::write(library_file, json_text)?;
+    let json_text = serde_json::to_string_pretty(library)?;
+    let temp_file = library_file.with_extension("tmp");
+    fs::write(&temp_file, json_text)?;
+    fs::rename(&temp_file, &library_file)?;
     Ok(())
 }
 
+pub fn load_library() -> Result<Vec<VisualNovel>, io::Error> {
+    let _guard = library_lock().lock().unwrap_or_else(|e| e.into_inner());
+    read_library_unlocked()
+}
+
+pub fn save_library(library: Vec<VisualNovel>) -> Result<(), io::Error> {
+    let _guard = library_lock().lock().unwrap_or_else(|e| e.into_inner());
+    write_library_unlocked(&library)
+}
+
 pub fn export_library_backup(dest_path: &Path) -> Result<(), io::Error> {
-    let library = load_library()?;
+    let _guard = library_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let library = read_library_unlocked()?;
     let json_text = serde_json::to_string_pretty(&library)?;
     fs::write(dest_path, json_text)?;
     Ok(())
@@ -76,7 +90,8 @@ pub fn import_library_backup(src_path: &Path) -> Result<Vec<VisualNovel>, io::Er
     let json_text = fs::read_to_string(src_path)?;
     let library = serde_json::from_str::<Vec<VisualNovel>>(&json_text)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    save_library(library.clone())?;
+    let _guard = library_lock().lock().unwrap_or_else(|e| e.into_inner());
+    write_library_unlocked(&library)?;
     Ok(library)
 }
 
@@ -125,13 +140,14 @@ pub fn add_play_session_to_library(
     vn_id: u64,
     play_session: crate::models::PlaySession,
 ) -> Result<(), io::Error> {
-    let mut library = load_library()?;
+    let _guard = library_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let mut library = read_library_unlocked()?;
     for vn in &mut library {
         if vn.id == vn_id {
             vn.play_sessions.push(play_session.clone());
         }
     }
-    save_library(library)?;
+    write_library_unlocked(&library)?;
     Ok(())
 }
 

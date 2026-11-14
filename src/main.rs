@@ -27,7 +27,10 @@ use storage::{
     save_settings,
 };
 use system::{is_flatpak_document_portal_path, open_folder, umu_launcher_is_available};
-use views::{AddVnForm, DetailView, Dropdown, DropdownOption, LibraryView, NewVN, SettingsView, local_path_to_data_url};
+use views::{
+    AddVnForm, DetailView, Dropdown, DropdownOption, LibraryView, NewVN, SettingsView,
+    invalidate_cover_cache, local_path_to_data_url,
+};
 
 use chrono::Utc;
 use dioxus::desktop::{
@@ -1267,10 +1270,14 @@ fn App() -> Element {
                                                     );
                                                 return;
                                             }
+                                            invalidate_cover_cache(&trimmed_cover_path);
                                             update_vn_and_save(
                                                 &mut vns,
                                                 id,
                                                 move |vn| {
+                                                    if let Some(old_path) = vn.cover_path.as_deref() {
+                                                        invalidate_cover_cache(old_path);
+                                                    }
                                                     vn.cover_path = Some(trimmed_cover_path);
                                                 },
                                                 "Could not save cover image".to_string(),
@@ -1310,6 +1317,7 @@ fn App() -> Element {
                                             spawn(async move {
                                                 match cache_cover_image(id, cover_url).await {
                                                     Ok(cover_path) => {
+                                                        invalidate_cover_cache(&cover_path);
                                                         for vn in vns_for_cover.write().iter_mut() {
                                                             if vn.id == id {
                                                                 vn.cover_path = Some(cover_path.clone());
@@ -1443,7 +1451,13 @@ fn App() -> Element {
                                 save_settings_or_log(&settings);
                             },
 
-                            on_custom_background_path_change: move |path| {
+                            on_custom_background_path_change: move |path: Option<String>| {
+                                if let Some(old_path) = settings.read().custom_background_path.as_deref() {
+                                    invalidate_cover_cache(old_path);
+                                }
+                                if let Some(new_path) = path.as_deref() {
+                                    invalidate_cover_cache(new_path);
+                                }
                                 settings.write().custom_background_path = path;
                                 save_settings_or_log(&settings);
                             },

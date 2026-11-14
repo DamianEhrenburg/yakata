@@ -1,7 +1,9 @@
 use crate::models::VisualNovel;
 use base64::Engine;
 use dioxus::prelude::*;
+use std::collections::HashMap;
 use std::fs;
+use std::sync::{Mutex, OnceLock};
 
 #[component]
 pub fn LibraryView(
@@ -146,11 +148,34 @@ fn local_cover_source(path: String) -> Option<String> {
     local_path_to_data_url(&path)
 }
 
+fn data_url_cache() -> &'static Mutex<HashMap<String, String>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+pub fn invalidate_cover_cache(path: &str) {
+    if let Ok(mut cache) = data_url_cache().lock() {
+        cache.remove(path);
+    }
+}
+
 pub fn local_path_to_data_url(path: &str) -> Option<String> {
+    if let Ok(cache) = data_url_cache().lock() {
+        if let Some(cached) = cache.get(path) {
+            return Some(cached.clone());
+        }
+    }
     let image_bytes = fs::read(path).ok()?;
     let mime_type = image_mime_type(path);
     let encoded_image = base64::engine::general_purpose::STANDARD.encode(image_bytes);
-    Some(format!("data:{mime_type};base64,{encoded_image}"))
+    let data_url = format!("data:{mime_type};base64,{encoded_image}");
+    if let Ok(mut cache) = data_url_cache().lock() {
+        if cache.len() >= 256 {
+            cache.clear();
+        }
+        cache.insert(path.to_string(), data_url.clone());
+    }
+    Some(data_url)
 }
 
 fn image_mime_type(path: &str) -> &'static str {

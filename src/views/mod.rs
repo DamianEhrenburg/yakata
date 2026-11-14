@@ -6,5 +6,5 @@ pub mod settings;
 pub use add_vn::{AddVnForm, NewVN};
 pub use detail::DetailView;
 pub use dropdown::{Dropdown, DropdownOption};
-pub use library::{LibraryView, local_path_to_data_url};
+pub use library::{LibraryView, invalidate_cover_cache, local_path_to_data_url};
 pub use settings::SettingsView;
