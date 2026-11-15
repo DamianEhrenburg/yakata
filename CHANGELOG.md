@@ -2,6 +2,30 @@
 
 All notable changes to Yakata are documented here.
 
+## [0.3.0] - 2026-11-15
+
+### Added
+- Single-step visual novel creation with automatic VNDB metadata fetching, tags, and cover art download.
+- Manual play session logging and deletion in the History tab.
+- In-app GitHub update checker and notification banner.
+- Sort direction toggle in topbar with ascending/descending modes.
+- Toggle button for Locale Emulator in launch settings.
+- VNDB search sorting controls and rating badges on cover previews.
+- Interactive story route tracking with active route selection and progress counter.
+- Two-line Discord Rich Presence with natural route naming.
+- VNDB spoiler and engine feature tag filtering.
+
+### Changed
+- Unified custom checkbox controls across the entire application.
+- Replaced static background image with procedural two-point lighting falloff and vector film grain.
+- Upgraded Dioxus framework dependencies and optimized VNDB search response time.
+- Refined tag chips with fixed layout dimensions and smooth hover highlighting.
+
+### Fixed
+- Reset filters action in empty library view updating UI signals immediately.
+- Prevented layout reflow, button overlap, and flickering when interacting with tags.
+- Hidden spinner arrows in session duration number inputs.
+
 ## [0.2.1] - 2026-11-10
 
 ### Fixed
@@ -13,7 +37,7 @@ All notable changes to Yakata are documented here.
 - Rebranded application to Yakata with Bordeaux Velvet crystal identity and custom typography.
 - Novel tracking statuses: Reading, Completed, Plan to Read, On Hold, Dropped.
 - Topbar status filter dropdown aligned horizontally with existing controls.
-- Personal score system (1–10) with cover badges and rating sorting.
+- Personal score system (1-10) with cover badges and rating sorting.
 - Windows process watchdog using Win32 ToolHelp to track game runtime across wrapper executables.
 - Locale Emulator (LEProc.exe) support for Japanese visual novels.
 - Direct "Open on VNDB" button on the details panel.

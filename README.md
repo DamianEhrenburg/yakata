@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/DamianEhrenburg/yakata/releases/latest">
-    <img src="https://img.shields.io/badge/release-v0.2.1-b91c1c?style=flat-square" alt="Latest release">
+    <img src="https://img.shields.io/badge/release-v0.3.0-b91c1c?style=flat-square" alt="Latest release">
   </a>
   <a href="https://github.com/DamianEhrenburg/yakata/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-3f3f46?style=flat-square" alt="License">
@@ -35,7 +35,7 @@ Yakata is a desktop visual novel launcher and tracker for Windows. It catalogs y
 - Add visual novels manually or fetch metadata and cover art from VNDB
 - Read synopses with expandable spoiler blocks
 - Track total playtime and session logs across child processes and engine wrappers
-- Launch Japanese titles with Locale Emulator (LEProc) directly from the app
+- Launch Japanese titles with Locale Emulator directly from the app
 - Filter and sort by reading status, 10-point personal score, favourites, and tags
 - Track story routes, playtime sessions, and personal notes
 - Discord Rich Presence with game status, route, and elapsed playtime
