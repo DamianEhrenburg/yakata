@@ -37,11 +37,24 @@ impl DiscordPresence {
             .assets(assets)
             .activity_type(activity::ActivityType::Playing);
 
-        if settings.discord_show_active_route && vn.active_route.is_some() {
-            let route_name = vn.active_route.as_ref().unwrap();
-            activity = activity.details(route_name.clone());
-        } else if !settings.discord_status_text.trim().is_empty() {
-            activity = activity.details(settings.discord_status_text.trim());
+        let status_text = settings.discord_status_text.trim();
+        let active_route_str = if settings.discord_show_active_route {
+            vn.active_route.as_deref().map(format_discord_route).filter(|s| !s.is_empty())
+        } else {
+            None
+        };
+
+        match (!status_text.is_empty(), active_route_str) {
+            (true, Some(route)) => {
+                activity = activity.details(status_text).state(route);
+            }
+            (true, None) => {
+                activity = activity.details(status_text);
+            }
+            (false, Some(route)) => {
+                activity = activity.details(route);
+            }
+            (false, None) => {}
         }
 
         client.set_activity(activity)?;
@@ -61,5 +74,44 @@ impl DiscordPresence {
         self.client.clear_activity()?;
         self.client.close()?;
         Ok(())
+    }
+}
+
+pub fn format_discord_route(name: &str) -> String {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    let lower = trimmed.to_lowercase();
+    let already_qualified = lower.contains("route")
+        || lower.contains("ending")
+        || lower.ends_with(" end")
+        || lower.contains("chapter")
+        || lower.contains("episode")
+        || lower.starts_with("ep.")
+        || lower.starts_with("ch.")
+        || lower.contains("arc");
+
+    if already_qualified {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed} Route")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_discord_route() {
+        assert_eq!(format_discord_route("Kasumi"), "Kasumi Route");
+        assert_eq!(format_discord_route("Kasumi route"), "Kasumi route");
+        assert_eq!(format_discord_route("Saber Route"), "Saber Route");
+        assert_eq!(format_discord_route("True End"), "True End");
+        assert_eq!(format_discord_route("Bad Ending 1"), "Bad Ending 1");
+        assert_eq!(format_discord_route("Chapter 3"), "Chapter 3");
+        assert_eq!(format_discord_route("Episode 1: Onikakushi"), "Episode 1: Onikakushi");
+        assert_eq!(format_discord_route("   "), "");
     }
 }

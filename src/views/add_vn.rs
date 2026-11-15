@@ -1,6 +1,6 @@
-use crate::models::NovelStatus;
+use crate::models::{LaunchMode, NovelStatus};
 use crate::views::dropdown::{Dropdown, DropdownOption};
-use crate::vndb::{VndbSearchResult, search_vns};
+use crate::vndb::{VndbSearchResult, VndbSortOrder, search_vns};
 use dioxus::prelude::*;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -14,6 +14,10 @@ pub struct NewVN {
     pub status: Option<NovelStatus>,
     pub rating: Option<u8>,
     pub is_nsfw: bool,
+    pub executable_path: Option<String>,
+    pub run_with_locale_emulator: bool,
+    pub launch_mode: LaunchMode,
+    pub steam_app_id: Option<u32>,
 }
 
 #[component]
@@ -35,7 +39,13 @@ pub fn AddVnForm(
     let mut selected_status = use_signal(|| Some(NovelStatus::PlanToRead));
     let mut selected_rating = use_signal(|| None::<u8>);
     let mut loaded_is_nsfw = use_signal(|| false);
+    let mut executable_path = use_signal(|| None::<String>);
+    let mut run_with_locale_emulator = use_signal(|| false);
+    let mut launch_mode = use_signal(|| LaunchMode::Native);
+    let mut steam_app_id = use_signal(String::new);
     let mut vndb_query = use_signal(String::new);
+    let mut vndb_sort = use_signal(|| VndbSortOrder::SearchRank);
+    let mut sort_reverse = use_signal(|| false);
     let mut search_results: Signal<Vec<VndbSearchResult>> = use_signal(Vec::new);
     let mut search_message = use_signal(String::new);
     let mut title_has_error = use_signal(|| false);
@@ -44,9 +54,16 @@ pub fn AddVnForm(
     let results_to_show = search_results.read().clone();
 
     let mut status_options = vec![DropdownOption::new("none", "No status")];
-    status_options.extend(NovelStatus::all().iter().map(|s| DropdownOption::new(s.key(), s.as_str())));
+    status_options.extend(
+        NovelStatus::all()
+            .iter()
+            .map(|s| DropdownOption::new(s.key(), s.as_str())),
+    );
 
-    let current_status_val = (*selected_status.read()).map(|s| s.key()).unwrap_or("none").to_string();
+    let current_status_val = (*selected_status.read())
+        .map(|s| s.key())
+        .unwrap_or("none")
+        .to_string();
 
     let score_options = vec![
         DropdownOption::new("none", "No score"),
@@ -66,6 +83,36 @@ pub fn AddVnForm(
         Some(r) => r.to_string(),
         None => "none".to_string(),
     };
+
+    let sort_options = vec![
+        DropdownOption::new("searchrank", "Relevance"),
+        DropdownOption::new("rating", "Rating"),
+        DropdownOption::new("released", "Newest"),
+        DropdownOption::new("title", "Title"),
+    ];
+
+    let current_sort_val = match *vndb_sort.read() {
+        VndbSortOrder::SearchRank => "searchrank",
+        VndbSortOrder::Rating => "rating",
+        VndbSortOrder::Released => "released",
+        VndbSortOrder::Title => "title",
+    }
+    .to_string();
+
+    let mut launch_mode_options = vec![DropdownOption::new("native", "Native")];
+    if cfg!(target_os = "linux") {
+        launch_mode_options.push(DropdownOption::new("wine", "Wine"));
+        launch_mode_options.push(DropdownOption::new("proton", "Proton"));
+    }
+    launch_mode_options.push(DropdownOption::new("steam", "Steam"));
+
+    let current_launch_mode_val = match *launch_mode.read() {
+        LaunchMode::Native => "native",
+        LaunchMode::Wine => "wine",
+        LaunchMode::Proton => "proton",
+        LaunchMode::Steam => "steam",
+    }
+    .to_string();
 
     rsx! {
         section {
@@ -171,6 +218,108 @@ pub fn AddVnForm(
                             },
                         }
                     }
+                    div { class: "add-vn-field-group",
+                        span { class: "add-vn-field-label", "Executable path" }
+                        div { class: "add-vn-input-browse-row",
+                            input {
+                                value: executable_path.read().clone().unwrap_or_default(),
+                                placeholder: "Optional: path to game .exe",
+                                oninput: move |event| {
+                                    let value = event.value();
+                                    if value.trim().is_empty() {
+                                        executable_path.set(None);
+                                    } else {
+                                        executable_path.set(Some(value));
+                                    }
+                                },
+                            }
+                            button {
+                                class: "add-vn-browse-btn",
+                                r#type: "button",
+                                onclick: move |_| {
+                                    let picked_file = rfd::FileDialog::new()
+                                        .add_filter("Executable", &["exe", "bin", "sh", "AppImage"])
+                                        .pick_file();
+                                    if let Some(path) = picked_file {
+                                        let path_str = path.to_string_lossy().to_string();
+                                        executable_path.set(Some(path_str.clone()));
+                                        if title.read().trim().is_empty() {
+                                            if let Some(inferred) = infer_title_from_executable_path(&path_str) {
+                                                title.set(inferred.clone());
+                                                vndb_query.set(inferred.clone());
+                                                title_has_error.set(false);
+                                                loaded_result_id.set(None);
+                                                search_message.set("Searching VNDB...".to_string());
+                                                let current_sort = *vndb_sort.read();
+                                                let current_rev = *sort_reverse.read();
+                                                spawn(async move {
+                                                    match search_vns(inferred, current_sort, current_rev).await {
+                                                        Ok(results) => {
+                                                            search_message.set(format_results_count(results.len()));
+                                                            search_results.set(results);
+                                                        }
+                                                        Err(error) => {
+                                                            search_message.set(format!("VNDB search failed: {error}"));
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    }
+                                },
+                                "Browse"
+                            }
+                        }
+                    }
+                    if cfg!(target_os = "windows") && *launch_mode.read() != LaunchMode::Steam {
+                        label { class: "checkbox-row",
+                            input {
+                                class: "setting-checkbox",
+                                r#type: "checkbox",
+                                checked: *run_with_locale_emulator.read(),
+                                onchange: move |event| {
+                                    run_with_locale_emulator.set(event.checked());
+                                },
+                            }
+                            span { "Run with Locale Emulator" }
+                        }
+                    }
+                    div { class: "add-vn-field-group",
+                        span { class: "add-vn-field-label", "Launch mode" }
+                        Dropdown {
+                            class: "drop-up".to_string(),
+                            options: launch_mode_options,
+                            selected_value: current_launch_mode_val,
+                            on_select: move |val: String| {
+                                let mode = match val.as_str() {
+                                    "wine" => LaunchMode::Wine,
+                                    "proton" => LaunchMode::Proton,
+                                    "steam" => LaunchMode::Steam,
+                                    _ => LaunchMode::Native,
+                                };
+                                launch_mode.set(mode);
+                            },
+                        }
+                    }
+                    if *launch_mode.read() == LaunchMode::Steam {
+                        div { class: "add-vn-field-group",
+                            span { class: "add-vn-field-label", "Steam App ID" }
+                            input {
+                                r#type: "text",
+                                value: "{steam_app_id.read()}",
+                                placeholder: "e.g. 1989270 or Steam URL",
+                                oninput: move |event| {
+                                    steam_app_id.set(event.value());
+                                },
+                                onblur: move |_| {
+                                    let parsed = crate::launcher::parse_steam_app_id(&steam_app_id.read());
+                                    if let Some(id) = parsed {
+                                        steam_app_id.set(id.to_string());
+                                    }
+                                },
+                            }
+                        }
+                    }
                     button {
                         class: "add-vn-submit-button",
                         onclick: move |_| {
@@ -192,6 +341,11 @@ pub fn AddVnForm(
                                     return;
                                 }
                             }
+                            let final_steam_app_id = if *launch_mode.read() == LaunchMode::Steam {
+                                crate::launcher::parse_steam_app_id(&steam_app_id.read())
+                            } else {
+                                None
+                            };
                             on_add
                                 .call(NewVN {
                                     title: typed_title,
@@ -207,6 +361,14 @@ pub fn AddVnForm(
                                     status: *selected_status.read(),
                                     rating: *selected_rating.read(),
                                     is_nsfw: *loaded_is_nsfw.read(),
+                                    executable_path: executable_path.read().clone(),
+                                    run_with_locale_emulator: if *launch_mode.read() == LaunchMode::Steam {
+                                        false
+                                    } else {
+                                        *run_with_locale_emulator.read()
+                                    },
+                                    launch_mode: launch_mode.read().clone(),
+                                    steam_app_id: final_steam_app_id,
                                 });
                             title.set(String::new());
                             description.set(String::new());
@@ -214,6 +376,10 @@ pub fn AddVnForm(
                             cover_url.set(None);
                             loaded_result_id.set(None);
                             loaded_is_nsfw.set(false);
+                            executable_path.set(None);
+                            run_with_locale_emulator.set(false);
+                            launch_mode.set(LaunchMode::Native);
+                            steam_app_id.set(String::new());
                             tags_text.set(String::new());
                             selected_rating.set(None);
                         },
@@ -242,10 +408,12 @@ pub fn AddVnForm(
                                     }
                                     loaded_result_id.set(None);
                                     search_message.set("Searching VNDB...".to_string());
+                                    let sort = *vndb_sort.read();
+                                    let rev = *sort_reverse.read();
                                     spawn(async move {
-                                        match search_vns(query).await {
+                                        match search_vns(query, sort, rev).await {
                                             Ok(results) => {
-                                                search_message.set(format!("Found {} result(s)", results.len()));
+                                                search_message.set(format_results_count(results.len()));
                                                 search_results.set(results);
                                             }
                                             Err(error) => {
@@ -255,6 +423,76 @@ pub fn AddVnForm(
                                     });
                                 }
                             },
+                        }
+                        Dropdown {
+                            class: "vndb-sort-dropdown",
+                            options: sort_options,
+                            selected_value: current_sort_val,
+                            on_select: move |val: String| {
+                                let new_sort = match val.as_str() {
+                                    "rating" => {
+                                        sort_reverse.set(true);
+                                        VndbSortOrder::Rating
+                                    }
+                                    "released" => {
+                                        sort_reverse.set(true);
+                                        VndbSortOrder::Released
+                                    }
+                                    "title" => {
+                                        sort_reverse.set(false);
+                                        VndbSortOrder::Title
+                                    }
+                                    _ => {
+                                        sort_reverse.set(false);
+                                        VndbSortOrder::SearchRank
+                                    }
+                                };
+                                vndb_sort.set(new_sort);
+                                let rev = *sort_reverse.read();
+                                let query = vndb_query.read().trim().to_string();
+                                if !query.is_empty() {
+                                    loaded_result_id.set(None);
+                                    search_message.set("Searching VNDB...".to_string());
+                                    spawn(async move {
+                                        match search_vns(query, new_sort, rev).await {
+                                            Ok(results) => {
+                                                search_message.set(format_results_count(results.len()));
+                                                search_results.set(results);
+                                            }
+                                            Err(error) => {
+                                                search_message.set(format!("VNDB search failed: {error}"));
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                        }
+                        button {
+                            class: "vndb-sort-direction-btn",
+                            r#type: "button",
+                            title: if *sort_reverse.read() { "Sort descending" } else { "Sort ascending" },
+                            onclick: move |_| {
+                                let new_rev = !*sort_reverse.read();
+                                sort_reverse.set(new_rev);
+                                let query = vndb_query.read().trim().to_string();
+                                if !query.is_empty() {
+                                    loaded_result_id.set(None);
+                                    search_message.set("Searching VNDB...".to_string());
+                                    let sort = *vndb_sort.read();
+                                    spawn(async move {
+                                        match search_vns(query, sort, new_rev).await {
+                                            Ok(results) => {
+                                                search_message.set(format_results_count(results.len()));
+                                                search_results.set(results);
+                                            }
+                                            Err(error) => {
+                                                search_message.set(format!("VNDB search failed: {error}"));
+                                            }
+                                        }
+                                    });
+                                }
+                            },
+                            if *sort_reverse.read() { "▼" } else { "▲" }
                         }
                         button {
                             class: "vndb-search-btn",
@@ -267,10 +505,12 @@ pub fn AddVnForm(
                                 }
                                 loaded_result_id.set(None);
                                 search_message.set("Searching VNDB...".to_string());
+                                let sort = *vndb_sort.read();
+                                let rev = *sort_reverse.read();
                                 spawn(async move {
-                                    match search_vns(query).await {
+                                    match search_vns(query, sort, rev).await {
                                         Ok(results) => {
-                                            search_message.set(format!("Found {} result(s)", results.len()));
+                                            search_message.set(format_results_count(results.len()));
                                             search_results.set(results);
                                         }
                                         Err(error) => {
@@ -282,80 +522,103 @@ pub fn AddVnForm(
                             "Search"
                         }
                     }
-                    div { class: "vndb-results-grid",
-                        if results_to_show.is_empty() {
-                            div { class: "vndb-empty-hint",
-                                p { "Type a title and click Search to look up metadata and cover art on VNDB." }
-                            }
+                    if results_to_show.is_empty() {
+                        div { class: "vndb-empty-hint",
+                            p { "Search by title or VNDB ID" }
                         }
-                        for result in results_to_show {
-                            {
-                                let result_title = result.title.clone();
-                                let result_description = result.description.clone();
-                                let result_cover_url = result.image.clone().and_then(|image| image.url);
-                                let is_sexual = result.image.as_ref().and_then(|img| img.sexual).unwrap_or(0.0) >= 1.0;
-                                let is_nsfw = is_sexual || {
-                                    let lower = result.title.to_lowercase();
-                                    lower.contains("18+") || lower.contains("eroge") || lower.contains("nukige") || lower.contains("hentai") || lower.contains("sexual") || lower.contains("nsfw") || lower.contains("adult")
-                                };
-                                let cover_class = if blur_nsfw && is_nsfw { "vndb-result-cover nsfw-blur" } else { "vndb-result-cover" };
-                                let result_id = result.id.clone();
-                                let result_is_loaded = loaded_result_id.read().as_ref() == Some(&result.id);
-                                let is_already_added = existing_vndb_ids.iter().any(|id| id.eq_ignore_ascii_case(&result.id))
-                                    || existing_titles.iter().any(|t| t.trim().eq_ignore_ascii_case(result.title.trim()));
-                                rsx! {
-                                    article { class: "vndb-result-card",
-                                        div { class: "vndb-result-cover-frame",
-                                            if let Some(cover_src) = result_cover_url.clone() {
-                                                img {
-                                                    class: "{cover_class}",
-                                                    src: "{cover_src}",
-                                                    alt: "Cover art for {result.title}",
-                                                }
-                                            } else {
-                                                div { class: "vndb-result-cover-placeholder", "No cover" }
+                    } else {
+                        div { class: "vndb-results-grid",
+                            for result in results_to_show {
+                                {
+                                    let result_title = result.title.clone();
+                                    let result_description = result.description.clone();
+                                    let result_cover_url = result.image.clone().and_then(|image| image.url);
+                                    let is_sexual = result.image.as_ref().and_then(|img| img.sexual).unwrap_or(0.0) >= 1.0;
+                                    let has_ero_tag = result.tags.iter().any(|t| t.category.as_deref() == Some("ero"));
+                                    let is_nsfw = is_sexual || has_ero_tag || {
+                                        let lower = result.title.to_lowercase();
+                                        lower.contains("18+") || lower.contains("eroge") || lower.contains("nukige") || lower.contains("hentai") || lower.contains("sexual") || lower.contains("nsfw")
+                                    };
+                                    let cover_class = if blur_nsfw && is_nsfw { "vndb-result-cover nsfw-blur" } else { "vndb-result-cover" };
+                                    let result_id = result.id.clone();
+                                    let result_is_loaded = loaded_result_id.read().as_ref() == Some(&result.id);
+                                    let is_already_added = existing_vndb_ids.iter().any(|id| id.eq_ignore_ascii_case(&result.id))
+                                        || existing_titles.iter().any(|t| t.trim().eq_ignore_ascii_case(result.title.trim()));
+                                    let card_class = if is_already_added {
+                                        "vndb-result-card in-library"
+                                    } else if result_is_loaded {
+                                        "vndb-result-card loaded"
+                                    } else {
+                                        "vndb-result-card"
+                                    };
+                                    let load_result = {
+                                        let result_title = result_title.clone();
+                                        let result_description = result_description.clone();
+                                        let result_cover_url = result_cover_url.clone();
+                                        let result_id = result_id.clone();
+                                        let tags = result.tags.clone();
+                                        move |_| {
+                                            if is_already_added {
+                                                search_message.set(format!("\"{}\" is already in your library.", result_title));
+                                                return;
                                             }
+                                            title.set(result_title.clone());
+                                            description.set(result_description.clone().unwrap_or_default());
+                                            cover_url.set(result_cover_url.clone());
+                                            cover_path.set(None);
+
+                                            let top_tags = crate::vndb::filter_vndb_tags(&tags, is_sexual || is_nsfw);
+                                            if !top_tags.is_empty() {
+                                                tags_text.set(top_tags.join(", "));
+                                            }
+
+                                            loaded_is_nsfw.set(is_nsfw);
+                                            loaded_result_id.set(Some(result_id.clone()));
+                                            search_message.set(format!("Loaded {}.", result_title));
                                         }
-                                        div { class: "vndb-result-body",
-                                            h3 { "{result.title}" }
-                                            p { "VNDB ID: {result.id}" }
-                                            button {
-                                                class: if is_already_added {
-                                                    "vndb-result-button in-library"
-                                                } else if result_is_loaded {
-                                                    "vndb-result-button loaded"
+                                    };
+                                    rsx! {
+                                        article {
+                                            class: "{card_class}",
+                                            onclick: load_result,
+                                            div { class: "vndb-result-cover-frame",
+                                                if let Some(cover_src) = result_cover_url.clone() {
+                                                    img {
+                                                        class: "{cover_class}",
+                                                        src: "{cover_src}",
+                                                        alt: "Cover art for {result.title}",
+                                                    }
                                                 } else {
-                                                    "vndb-result-button"
-                                                },
-                                                onclick: move |_| {
+                                                    div { class: "vndb-result-cover-placeholder", "No cover" }
+                                                }
+                                                if let Some(rating) = result.rating {
+                                                    span { class: "vndb-rating-badge", "★ {rating / 10.0:.2}" }
+                                                }
+                                            }
+                                            div { class: "vndb-result-body",
+                                                h3 { "{result.title}" }
+                                                if let Some(ref rel) = result.released {
+                                                    if rel.len() >= 4 {
+                                                        span { class: "vndb-release-year", "{&rel[..4]}" }
+                                                    }
+                                                }
+                                                p { "VNDB ID: {result.id}" }
+                                                button {
+                                                    class: if is_already_added {
+                                                        "vndb-result-button in-library"
+                                                    } else if result_is_loaded {
+                                                        "vndb-result-button loaded"
+                                                    } else {
+                                                        "vndb-result-button"
+                                                    },
+                                                    tabindex: "-1",
                                                     if is_already_added {
-                                                        search_message.set(format!("\"{}\" is already in your library.", result_title));
-                                                        return;
+                                                        "In library"
+                                                    } else if result_is_loaded {
+                                                        "Loaded"
+                                                    } else {
+                                                        "Use"
                                                     }
-                                                    title.set(result_title.clone());
-                                                    description.set(result_description.clone().unwrap_or_default());
-                                                    cover_url.set(result_cover_url.clone());
-                                                    cover_path.set(None);
-                                                    if is_sexual || is_nsfw {
-                                                        let mut current = tags_text.read().clone();
-                                                        if !current.contains("18+") {
-                                                            if !current.trim().is_empty() && !current.trim_end().ends_with(',') {
-                                                                current.push_str(", ");
-                                                            }
-                                                            current.push_str("18+");
-                                                            tags_text.set(current);
-                                                        }
-                                                    }
-                                                    loaded_is_nsfw.set(is_nsfw);
-                                                    loaded_result_id.set(Some(result_id.clone()));
-                                                    search_message.set(format!("Loaded {}.", result_title));
-                                                },
-                                                if is_already_added {
-                                                    "In library"
-                                                } else if result_is_loaded {
-                                                    "Loaded"
-                                                } else {
-                                                    "Use"
                                                 }
                                             }
                                         }
@@ -370,9 +633,82 @@ pub fn AddVnForm(
     }
 }
 
+fn infer_title_from_executable_path(path_str: &str) -> Option<String> {
+    let path = std::path::Path::new(path_str);
+    let mut current = path.parent();
+    let skip_names = [
+        "bin", "game", "games", "system", "win32", "win64", "release", "data", "x86", "x64",
+    ];
+    while let Some(parent) = current {
+        let name = parent.file_name()?.to_string_lossy();
+        if !skip_names.contains(&name.to_lowercase().as_str()) && !name.trim().is_empty() {
+            let cleaned = clean_folder_title(&name);
+            if !cleaned.is_empty() {
+                return Some(cleaned);
+            }
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+fn clean_folder_title(name: &str) -> String {
+    let mut result = String::new();
+    let mut bracket_depth = 0;
+    for ch in name.chars() {
+        match ch {
+            '[' | '(' | '{' => bracket_depth += 1,
+            ']' | ')' | '}' => {
+                if bracket_depth > 0 {
+                    bracket_depth -= 1;
+                }
+            }
+            _ if bracket_depth == 0 => result.push(ch),
+            _ => {}
+        }
+    }
+    let trimmed = result.trim().replace('_', " ");
+    trimmed.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn parse_tags(text: String) -> Vec<String> {
     text.split(",")
         .map(|tag| tag.trim().to_string())
         .filter(|tag| !tag.is_empty())
         .collect()
+}
+
+fn format_results_count(count: usize) -> String {
+    if count == 1 {
+        "Found 1 result".to_string()
+    } else {
+        format!("Found {count} results")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_infer_title_from_executable_path() {
+        assert_eq!(
+            infer_title_from_executable_path(r"C:\Games\Steins;Gate\game.exe"),
+            Some("Steins;Gate".to_string())
+        );
+        assert_eq!(
+            infer_title_from_executable_path(r"C:\Games\[RJ12345] Mahoyo (v1.0)\bin\game.exe"),
+            Some("Mahoyo".to_string())
+        );
+        assert_eq!(
+            infer_title_from_executable_path(r"C:\Games\Fate_Stay_Night\release\fate.exe"),
+            Some("Fate Stay Night".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_tags() {
+        let tags = parse_tags("Action, Sci-Fi, Mystery, , 18+".to_string());
+        assert_eq!(tags, vec!["Action", "Sci-Fi", "Mystery", "18+"]);
+    }
 }

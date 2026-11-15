@@ -8,20 +8,39 @@ use std::sync::{Mutex, OnceLock};
 #[component]
 pub fn LibraryView(
     vns: Vec<VisualNovel>,
+    total_vns_count: usize,
     selected_vn_id: Option<u64>,
     blur_nsfw: bool,
     on_select: EventHandler<u64>,
     on_toggle_favourite: EventHandler<u64>,
+    on_open_add_form: EventHandler<()>,
+    on_reset_filters: EventHandler<()>,
 ) -> Element {
-    let library_is_empty = vns.is_empty();
     rsx! {
         section { class: "library-section",
             div { class: "library-heading",
                 h2 { "Library" }
                 span { class: "library-count", "{vns.len()}" }
             }
-            if library_is_empty {
-                p { "No visual novels in your library yet." }
+            if total_vns_count == 0 {
+                div { class: "library-empty-state",
+                    h3 { "No visual novels yet" }
+                    p { "Add an entry manually or search VNDB." }
+                    button {
+                        class: "library-empty-button",
+                        onclick: move |_| on_open_add_form.call(()),
+                        "+ Add visual novel"
+                    }
+                }
+            } else if vns.is_empty() {
+                div { class: "library-empty-state",
+                    p { "No visual novels match the active filters." }
+                    button {
+                        class: "library-empty-button",
+                        onclick: move |_| on_reset_filters.call(()),
+                        "Reset filters"
+                    }
+                }
             } else {
                 div { class: "vn-grid",
                     for vn in vns {
@@ -69,14 +88,7 @@ pub fn LibraryView(
                                         }
                                     }
                                     div { class: "vn-card-info",
-                                        h3 { "{vn.title}" }
-                                        if !vn.tags.is_empty() {
-                                            div { class: "vn-card-tags",
-                                                for tag in vn.tags.iter().take(3) {
-                                                    span { class: "vn-card-tag", "{tag}" }
-                                                }
-                                            }
-                                        }
+                                        h3 { title: "{vn.title}", "{vn.title}" }
                                     }
                                 }
                             }

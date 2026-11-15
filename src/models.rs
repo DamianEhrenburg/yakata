@@ -226,6 +226,8 @@ pub struct AppSettings {
     pub discord_custom_cover_url: String,
     #[serde(default)]
     pub library_sort_mode: LibrarySortMode,
+    #[serde(default = "default_sort_descending")]
+    pub library_sort_descending: bool,
     #[serde(default, skip_serializing)]
     pub library_filter_mode: LibraryFilterMode,
     #[serde(default)]
@@ -244,6 +246,10 @@ fn default_discord_status_text() -> String {
     "Reading".to_string()
 }
 
+fn default_sort_descending() -> bool {
+    true
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -252,6 +258,7 @@ impl Default for AppSettings {
             discord_show_active_route: true,
             discord_custom_cover_url: String::new(),
             library_sort_mode: LibrarySortMode::default(),
+            library_sort_descending: true,
             library_filter_mode: LibraryFilterMode::default(),
             custom_background_path: None,
             leproc_path: None,
@@ -306,6 +313,7 @@ mod tests {
         assert!(settings.leproc_path.is_none());
         assert!(!settings.filter_favourites_only);
         assert!(settings.filter_status.is_none());
+        assert!(settings.library_sort_descending);
     }
 
     #[test]
@@ -321,6 +329,7 @@ mod tests {
         let settings: AppSettings = serde_json::from_str(old_json).expect("Failed to deserialize old settings");
         assert!(!settings.filter_favourites_only);
         assert!(settings.filter_status.is_none());
+        assert!(settings.library_sort_descending);
     }
 
     #[test]

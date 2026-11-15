@@ -141,3 +141,68 @@ pub fn game_folder_for(game_folder: Option<&str>, executable_path: &str) -> Opti
         .or_else(|| Path::new(executable_path).parent().map(Path::to_path_buf))
         .filter(|folder| !folder.as_os_str().is_empty())
 }
+
+pub fn resolve_steam_game_folder(app_id: u32) -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut candidates = Vec::new();
+        if let Some(prog_files_x86) = std::env::var_os("ProgramFiles(x86)") {
+            candidates.push(PathBuf::from(prog_files_x86).join("Steam"));
+        }
+        if let Some(prog_files) = std::env::var_os("ProgramFiles") {
+            candidates.push(PathBuf::from(prog_files).join("Steam"));
+        }
+        candidates.push(PathBuf::from(r"C:\Program Files (x86)\Steam"));
+        candidates.push(PathBuf::from(r"C:\Program Files\Steam"));
+
+        let steam_dir = candidates
+            .into_iter()
+            .find(|p| p.join("steam.exe").exists() || p.join("steamapps").exists())?;
+
+        let mut library_paths = Vec::new();
+        library_paths.push(steam_dir.clone());
+
+        let vdf_path = steam_dir.join("steamapps").join("libraryfolders.vdf");
+        if let Ok(vdf_content) = std::fs::read_to_string(&vdf_path) {
+            for line in vdf_content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("\"path\"") {
+                    let parts: Vec<&str> = trimmed.split('"').collect();
+                    if parts.len() >= 4 {
+                        let clean_path = parts[3].replace(r"\\", r"\");
+                        let lib_path = PathBuf::from(clean_path);
+                        if lib_path.exists() && !library_paths.contains(&lib_path) {
+                            library_paths.push(lib_path);
+                        }
+                    }
+                }
+            }
+        }
+
+        let manifest_name = format!("appmanifest_{app_id}.acf");
+        for lib in library_paths {
+            let manifest_path = lib.join("steamapps").join(&manifest_name);
+            if let Ok(manifest_content) = std::fs::read_to_string(&manifest_path) {
+                for line in manifest_content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("\"installdir\"") {
+                        let parts: Vec<&str> = trimmed.split('"').collect();
+                        if parts.len() >= 4 {
+                            let install_dir = parts[3];
+                            let game_dir = lib.join("steamapps").join("common").join(install_dir);
+                            if game_dir.is_dir() {
+                                return Some(game_dir);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app_id;
+        None
+    }
+}

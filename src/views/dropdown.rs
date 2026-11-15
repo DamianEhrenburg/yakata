@@ -46,7 +46,11 @@ pub fn Dropdown(
 
     rsx! {
         div {
-            class: "custom-dropdown {class}",
+            class: if *is_open.read() {
+                format!("custom-dropdown open {class}")
+            } else {
+                format!("custom-dropdown {class}")
+            },
             tabindex: "-1",
             onkeydown: move |evt| {
                 if evt.key().to_string() == "Escape" && *is_open.read() {
@@ -55,7 +59,11 @@ pub fn Dropdown(
             },
             button {
                 r#type: "button",
-                class: if *is_open.read() { "dropdown-trigger open" } else { "dropdown-trigger" },
+                class: if *is_open.read() {
+                    format!("dropdown-trigger open val-{selected_value}")
+                } else {
+                    format!("dropdown-trigger val-{selected_value}")
+                },
                 onclick: move |e| {
                     e.stop_propagation();
                     is_open.toggle();
@@ -93,9 +101,14 @@ pub fn Dropdown(
                         {
                             let val = opt.value.clone();
                             let is_selected = val == selected_value;
+                            let item_class = if is_selected {
+                                format!("dropdown-item selected val-{val}")
+                            } else {
+                                format!("dropdown-item val-{val}")
+                            };
                             rsx! {
                                 div {
-                                    class: if is_selected { "dropdown-item selected" } else { "dropdown-item" },
+                                    class: "{item_class}",
                                     onclick: {
                                         let val = val.clone();
                                         move |e| {

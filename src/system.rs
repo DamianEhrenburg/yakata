@@ -72,3 +72,75 @@ pub fn is_flatpak_document_portal_path(path: &str) -> bool {
     };
     path_after_user_id.starts_with("doc/")
 }
+
+pub fn open_url(url: &str) -> Result<(), io::Error> {
+    if cfg!(target_os = "windows") {
+        Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn()?;
+    } else {
+        Command::new("xdg-open")
+            .arg(url)
+            .spawn()?;
+    }
+    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+}
+
+pub async fn check_latest_github_release() -> Option<String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .user_agent("yakata-app")
+        .build()
+        .ok()?;
+
+    let response = client
+        .get("https://api.github.com/repos/DamianEhrenburg/yakata/releases/latest")
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<GithubRelease>()
+        .await
+        .ok()?;
+
+    let tag = response.tag_name.trim();
+    let remote_ver_str = tag
+        .strip_prefix('v')
+        .or_else(|| tag.strip_prefix('V'))
+        .unwrap_or(tag);
+    let remote_ver = parse_semver(remote_ver_str)?;
+    let local_ver = parse_semver(env!("CARGO_PKG_VERSION"))?;
+
+    if remote_ver > local_ver {
+        Some(tag.to_string())
+    } else {
+        None
+    }
+}
+
+fn parse_semver(v: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = v.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.split('-').next()?.parse().ok()?;
+    Some((major, minor, patch))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_semver() {
+        assert_eq!(parse_semver("0.3.0"), Some((0, 3, 0)));
+        assert_eq!(parse_semver("1.2.3-beta"), Some((1, 2, 3)));
+        assert!(parse_semver("0.3.0") > parse_semver("0.2.1"));
+        assert_eq!(parse_semver("invalid"), None);
+    }
+}

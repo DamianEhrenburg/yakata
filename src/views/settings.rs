@@ -63,7 +63,7 @@ pub fn SettingsView(
                     }
                 }
                 div { class: "setting-row",
-                    label { class: "locale-emulator-checkbox-label",
+                    label { class: "checkbox-row",
                         input {
                             class: "setting-checkbox",
                             r#type: "checkbox",
@@ -72,8 +72,9 @@ pub fn SettingsView(
                                 on_blur_nsfw_change.call(event.checked());
                             },
                         }
-                        span { "Blur 18+ covers (NSFW)" }
+                        span { "Blur 18+ covers" }
                     }
+                    p { class: "setting-help", "Blur 18+ covers until hovered." }
                 }
             }
             if cfg!(target_os = "windows") {
@@ -115,16 +116,19 @@ pub fn SettingsView(
             }
             div { class: "settings-section",
                 h3 { "Discord Rich Presence" }
-                label { class: "setting-row",
-                    span { "Enable Rich Presence" }
-                    input {
-                        class: "setting-checkbox",
-                        r#type: "checkbox",
-                        checked: discord_rich_presence_enabled,
-                        onchange: move |event| {
-                            on_discord_rich_presence_change.call(event.checked());
-                        },
+                div { class: "setting-row",
+                    label { class: "checkbox-row",
+                        input {
+                            class: "setting-checkbox",
+                            r#type: "checkbox",
+                            checked: discord_rich_presence_enabled,
+                            onchange: move |event| {
+                                on_discord_rich_presence_change.call(event.checked());
+                            },
+                        }
+                        span { "Enable Rich Presence" }
                     }
+                    p { class: "setting-help", "Show the VN being played on your Discord profile." }
                 }
                 label { class: "setting-row",
                     span { "Default status text" }
@@ -138,15 +142,17 @@ pub fn SettingsView(
                         },
                     }
                 }
-                label { class: "setting-row",
-                    span { "Show active route" }
-                    input {
-                        class: "setting-checkbox",
-                        r#type: "checkbox",
-                        checked: discord_show_active_route,
-                        onchange: move |event| {
-                            on_discord_show_active_route_change.call(event.checked());
-                        },
+                div { class: "setting-row",
+                    label { class: "checkbox-row",
+                        input {
+                            class: "setting-checkbox",
+                            r#type: "checkbox",
+                            checked: discord_show_active_route,
+                            onchange: move |event| {
+                                on_discord_show_active_route_change.call(event.checked());
+                            },
+                        }
+                        span { "Show active route" }
                     }
                 }
                 label { class: "setting-row",
@@ -163,7 +169,6 @@ pub fn SettingsView(
                         },
                     }
                 }
-                p { class: "setting-help", "Show the VN being played on your Discord profile." }
             }
             div { class: "settings-section",
                 h3 { "Data & Backup" }
@@ -177,17 +182,17 @@ pub fn SettingsView(
                         onclick: move |_| {
                             on_export_library.call(());
                         },
-                        "Export Library (JSON)"
+                        "Export library"
                     }
                     button {
                         class: "fp-button",
                         onclick: move |_| {
                             on_import_library.call(());
                         },
-                        "Import Library (JSON)"
+                        "Import library"
                     }
                 }
-                p { class: "setting-help", "Exports or restores a Yakata/Kakera library backup (library_json). Importing replaces your current library." }
+                p { class: "setting-help", "Importing a JSON backup will replace the current library." }
                 div { class: "setting-button-row",
                     button {
                         class: "fp-button",

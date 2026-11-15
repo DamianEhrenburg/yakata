@@ -62,6 +62,8 @@ pub fn DetailView(
     on_status_change: EventHandler<(u64, Option<NovelStatus>)>,
     on_rating_change: EventHandler<(u64, Option<u8>)>,
     on_run_with_locale_emulator_change: EventHandler<(u64, bool)>,
+    on_add_play_session: EventHandler<(u64, u64, Option<String>)>,
+    on_delete_play_session: EventHandler<(u64, usize)>,
 ) -> Element {
     let mut new_route_name = use_signal(String::new);
     let typed_route_name = new_route_name.read().clone();
@@ -122,6 +124,10 @@ pub fn DetailView(
     let selected_tab = active_tab.read().clone();
     let mut launch_settings_are_open = use_signal(|| false);
     let launch_settings_open = *launch_settings_are_open.read();
+    let mut add_session_open = use_signal(|| false);
+    let mut add_session_hours = use_signal(|| "0".to_string());
+    let mut add_session_minutes = use_signal(|| "30".to_string());
+    let mut add_session_note = use_signal(String::new);
     let total_playtime_seconds: u64 = vn
         .play_sessions
         .iter()
@@ -267,7 +273,7 @@ pub fn DetailView(
                                 onclick: move |_| {
                                     open_url_in_browser(&vndb_url);
                                 },
-                                "Open on VNDB ↗"
+                                "Open on VNDB"
                             }
                         }
                     }
@@ -299,52 +305,58 @@ pub fn DetailView(
                                 }
                             }
                             if tag_editor_open {
-                                input {
-                                    class: "tag-editor-input inline",
-                                    value: "{new_tag_value}",
-                                    placeholder: "Tag name",
-                                    maxlength: "30",
-                                    autofocus: true,
+                                {
+                                    let tags_for_keydown = vn.tags.clone();
+                                    let vn_id = vn.id;
+                                    rsx! {
+                                        input {
+                                            class: "tag-editor-input inline",
+                                            value: "{new_tag_value}",
+                                            placeholder: "Tag name",
+                                            maxlength: "30",
+                                            autofocus: true,
 
-                                    oninput: move |event| {
-                                        let val = event.value();
-                                        if val.chars().count() <= 30 {
-                                            new_tag_text.set(val);
+                                            oninput: move |event| {
+                                                let val = event.value();
+                                                if val.chars().count() <= 30 {
+                                                    new_tag_text.set(val);
+                                                }
+                                            },
+
+                                            onkeydown: move |event| {
+                                                let pressed_key = event.key().to_string();
+
+                                                if pressed_key == "Enter" {
+                                                    let typed_tag = new_tag_text.read().trim().to_string();
+
+                                                    if typed_tag.is_empty() || typed_tag.chars().count() > 30 {
+                                                        return;
+                                                    }
+
+                                                    let mut next_tags = tags_for_keydown.clone();
+                                                    let already_exists = next_tags
+                                                        .iter()
+                                                        .any(|tag| tag.eq_ignore_ascii_case(&typed_tag));
+
+                                                    if !already_exists {
+                                                        next_tags.push(typed_tag);
+                                                        on_tags_change.call((vn_id, next_tags));
+                                                    }
+
+                                                    new_tag_text.set(String::new());
+                                                    tag_editor_is_open.set(false);
+                                                } else if pressed_key == "Escape" {
+                                                    new_tag_text.set(String::new());
+                                                    tag_editor_is_open.set(false);
+                                                }
+                                            },
+
+                                            onblur: move |_| {
+                                                new_tag_text.set(String::new());
+                                                tag_editor_is_open.set(false);
+                                            },
                                         }
-                                    },
-
-                                    onkeydown: move |event| {
-                                        let pressed_key = event.key().to_string();
-
-                                        if pressed_key == "Enter" {
-                                            let typed_tag = new_tag_text.read().trim().to_string();
-
-                                            if typed_tag.is_empty() || typed_tag.chars().count() > 30 {
-                                                return;
-                                            }
-
-                                            let mut next_tags = vn.tags.clone();
-                                            let already_exists = next_tags
-                                                .iter()
-                                                .any(|tag| tag.eq_ignore_ascii_case(&typed_tag));
-
-                                            if !already_exists {
-                                                next_tags.push(typed_tag);
-                                                on_tags_change.call((vn.id, next_tags));
-                                            }
-
-                                            new_tag_text.set(String::new());
-                                            tag_editor_is_open.set(false);
-                                        } else if pressed_key == "Escape" {
-                                            new_tag_text.set(String::new());
-                                            tag_editor_is_open.set(false);
-                                        }
-                                    },
-
-                                    onblur: move |_| {
-                                        new_tag_text.set(String::new());
-                                        tag_editor_is_open.set(false);
-                                    },
+                                    }
                                 }
                             } else {
                                 button {
@@ -358,11 +370,11 @@ pub fn DetailView(
                             }
                         }
                     }
-                    h3 { "Description" }
-                    div { class: if *description_is_editing.read() { "desc-box editing" } else { "desc-box" },
+                    div { class: "detail-section-header",
+                        h3 { "Description" }
                         button {
-                            class: "desc-edit-button",
-                            title: "Edit Description",
+                            class: "section-action-btn",
+                            title: if *description_is_editing.read() { "Close editor" } else { "Edit description" },
                             onclick: move |_| {
                                 let next_value = !*description_is_editing.read();
                                 if next_value {
@@ -370,8 +382,10 @@ pub fn DetailView(
                                 }
                                 description_is_editing.set(next_value);
                             },
-                            "✎"
+                            if *description_is_editing.read() { "✕" } else { "✎" }
                         }
+                    }
+                    div { class: if *description_is_editing.read() { "desc-box editing" } else { "desc-box" },
                         if *description_is_editing.read() {
                             textarea {
                                 class: "detail-desc-input",
@@ -395,12 +409,11 @@ pub fn DetailView(
                         }
                     }
 
-                    h3 { "Notes" }
-
-                    div { class: if *notes_is_editing.read() { "notes-box editing" } else { "notes-box" },
+                    div { class: "detail-section-header",
+                        h3 { "Notes" }
                         button {
-                            class: "notes-edit-button",
-                            title: "Edit notes",
+                            class: "section-action-btn",
+                            title: if *notes_is_editing.read() { "Close editor" } else { "Edit notes" },
                             onclick: move |_| {
                                 let next_value = !*notes_is_editing.read();
                                 if next_value {
@@ -408,8 +421,11 @@ pub fn DetailView(
                                 }
                                 notes_is_editing.set(next_value);
                             },
-                            "✎"
+                            if *notes_is_editing.read() { "✕" } else { "✎" }
                         }
+                    }
+
+                    div { class: if *notes_is_editing.read() { "notes-box editing" } else { "notes-box" },
                         if *notes_is_editing.read() {
                             textarea {
                                 class: "notes-input",
@@ -460,41 +476,46 @@ pub fn DetailView(
                     h3 { "Launch" }
                     label {
                         "Executable path"
-                        input {
-                            value: "{executable_path_value}",
-                            oninput: move |event| {
-                                executable_path_draft.set(event.value());
-                            },
-                            onblur: move |_| {
-                                on_executable_path_change.call((vn.id, executable_path_draft.read().clone()));
-                            },
+                        div { class: "add-vn-input-browse-row",
+                            input {
+                                value: "{executable_path_value}",
+                                placeholder: "Optional: path to game .exe",
+                                oninput: move |event| {
+                                    executable_path_draft.set(event.value());
+                                },
+                                onblur: move |_| {
+                                    on_executable_path_change.call((vn.id, executable_path_draft.read().clone()));
+                                },
+                            }
+                            button {
+                                class: "add-vn-browse-btn",
+                                r#type: "button",
+                                onclick: move |_| {
+                                    let picked_file = FileDialog::new()
+                                        .add_filter("Executables", &["exe", "bin", "sh", "AppImage"])
+                                        .add_filter("All Files", &["*"])
+                                        .pick_file();
+                                    if let Some(path) = picked_file {
+                                        let path_text = path.to_string_lossy().to_string();
+                                        executable_path_draft.set(path_text.clone());
+                                        on_executable_path_change.call((vn.id, path_text));
+                                    }
+                                },
+                                "Browse"
+                            }
                         }
                     }
-                    button {
-                        class: "fp-button",
-                        onclick: move |_| {
-                            let picked_file = FileDialog::new()
-                                .add_filter("Executables", &["exe", "bin", "sh", "AppImage"])
-                                .add_filter("All Files", &["*"])
-                                .pick_file();
-                            if let Some(path) = picked_file {
-                                let path_text = path.to_string_lossy().to_string();
-                                executable_path_draft.set(path_text.clone());
-                                on_executable_path_change.call((vn.id, path_text));
-                            }
-                        },
-                        "Choose executable"
-                    }
-                    if cfg!(target_os = "windows") {
-                        label { class: "locale-emulator-checkbox-label",
+                    if cfg!(target_os = "windows") && vn.launch_mode != LaunchMode::Steam {
+                        label { class: "checkbox-row",
                             input {
+                                class: "setting-checkbox",
                                 r#type: "checkbox",
                                 checked: vn.run_with_locale_emulator,
                                 onchange: move |event| {
                                     on_run_with_locale_emulator_change.call((vn.id, event.checked()));
                                 },
                             }
-                            span { "Run with Locale Emulator (LEProc)" }
+                            span { "Run with Locale Emulator" }
                         }
                     }
                     div { class: "launch-selector",
@@ -535,7 +556,7 @@ pub fn DetailView(
                             "Steam App ID"
                             input {
                                 r#type: "text",
-                                placeholder: "1989270 or Steam URL",
+                                placeholder: "e.g. 1989270 or Steam URL",
                                 value: "{steam_app_id_value}",
                                 oninput: move |event| {
                                     steam_app_id_draft.set(event.value());
@@ -790,7 +811,7 @@ pub fn DetailView(
                                     "Environment Variables"
                                     textarea {
                                         class: "launch-env-input",
-                                        placeholder: "Place env vars here, 1 per line.",
+                                        placeholder: "KEY=VALUE, one per line",
                                         value: "{launch_environment_value}",
                                         oninput: move |event| {
                                             launch_environment_draft.set(event.value());
@@ -817,80 +838,184 @@ pub fn DetailView(
                             strong { "{vn.play_sessions.len()}" }
                         }
                     }
-                    h3 { "Play sessions" }
+                    div { class: "detail-section-header",
+                        h3 { "Play sessions" }
+                        button {
+                            class: "section-action-btn",
+                            title: if *add_session_open.read() { "Cancel adding session" } else { "Add play session" },
+                            onclick: move |_| {
+                                let next = !*add_session_open.read();
+                                add_session_open.set(next);
+                            },
+                            if *add_session_open.read() { "−" } else { "+" }
+                        }
+                    }
+                    if *add_session_open.read() {
+                        div { class: "add-session-form",
+                            div { class: "add-session-inputs",
+                                label {
+                                    "Hours"
+                                    input {
+                                        r#type: "number",
+                                        min: "0",
+                                        value: "{add_session_hours}",
+                                        oninput: move |e| add_session_hours.set(e.value()),
+                                    }
+                                }
+                                label {
+                                    "Minutes"
+                                    input {
+                                        r#type: "number",
+                                        min: "0",
+                                        max: "59",
+                                        value: "{add_session_minutes}",
+                                        oninput: move |e| add_session_minutes.set(e.value()),
+                                    }
+                                }
+                                label {
+                                    "Note"
+                                    input {
+                                        r#type: "text",
+                                        placeholder: "e.g. Steam, Offline",
+                                        value: "{add_session_note}",
+                                        oninput: move |e| add_session_note.set(e.value()),
+                                    }
+                                }
+                            }
+                            div { class: "add-session-actions",
+                                button {
+                                    class: "add-session-save-btn",
+                                    onclick: move |_| {
+                                        let h: u64 = add_session_hours.read().parse().unwrap_or(0);
+                                        let m: u64 = add_session_minutes.read().parse().unwrap_or(0);
+                                        let total_sec = h * 3600 + m * 60;
+                                        if total_sec > 0 {
+                                            let note = add_session_note.read().trim().to_string();
+                                            let note_opt = if note.is_empty() { None } else { Some(note) };
+                                            on_add_play_session.call((vn.id, total_sec, note_opt));
+                                            add_session_open.set(false);
+                                            add_session_hours.set("0".to_string());
+                                            add_session_minutes.set("30".to_string());
+                                            add_session_note.set(String::new());
+                                        }
+                                    },
+                                    "Save"
+                                }
+                                button {
+                                    class: "add-session-cancel-btn",
+                                    onclick: move |_| {
+                                        add_session_open.set(false);
+                                    },
+                                    "Cancel"
+                                }
+                            }
+                        }
+                    }
                     if vn.play_sessions.is_empty() {
-                        p { class: "stat-label", "No play sessions recorded yet." }
+                        p { class: "stat-label", "No play sessions yet." }
                     } else {
-                        ul { class: "history-session-list",
-                            for session in vn.play_sessions.iter().rev() {
-                                li { class: "history-session-item",
-                                    span { class: "session-date", "{format_started_at(session.started_at.clone())}" }
+                        div { class: "history-session-list",
+                            for (idx, session) in vn.play_sessions.iter().enumerate().rev() {
+                                div { class: "history-session-item",
+                                    div { class: "history-session-info",
+                                        span { class: "session-date", "{format_started_at(session.started_at.clone())}" }
+                                        if let Some(ref note) = session.notes {
+                                            span { class: "session-note", "{note}" }
+                                        }
+                                    }
                                     span { class: "session-duration", "{format_session_duration(session.duration_seconds)}" }
+                                    button {
+                                        class: "session-delete-button",
+                                        title: "Delete session",
+                                        onclick: move |_| {
+                                            on_delete_play_session.call((vn.id, idx));
+                                        },
+                                        "✕"
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 if selected_tab == DetailTab::Routes {
-                    h3 { "Routes" }
-                    p { "Routes tracked: {vn.routes.len()}" }
-                    label {
-                        "New route"
-                        input {
-                            class: if route_name_error_is_visible { "field-invalid" } else { "" },
-                            value: "{typed_route_name}",
-                            oninput: move |event| {
-                                let value = event.value();
-                                if !value.trim().is_empty() {
-                                    route_name_has_error.set(false);
+                    {
+                        let completed_count = vn.routes.iter().filter(|r| r.completed).count();
+                        let total_count = vn.routes.len();
+                        let is_all_completed = completed_count == total_count && total_count > 0;
+                        let progress_badge_class = if is_all_completed {
+                            "route-progress-badge all-completed"
+                        } else {
+                            "route-progress-badge"
+                        };
+                        rsx! {
+                            div { class: "detail-section-header",
+                                h3 { "Routes" }
+                                if total_count > 0 {
+                                    span { class: "{progress_badge_class}", "{completed_count} / {total_count} completed" }
                                 }
-                                new_route_name.set(event.value());
-                            },
-                        }
-                    }
-                    if route_name_error_is_visible {
-                        p { class: "field-error", "Route name is required." }
-                    }
-                    button {
-                        onclick: move |_| {
-                            let route_name = new_route_name.read().trim().to_string();
-                            if route_name.is_empty() {
-                                route_name_has_error.set(true);
-                                return;
                             }
-                            on_route_add.call((vn.id, route_name));
-                            new_route_name.set(String::new());
-                        },
-                        "Add route"
-                    }
-                    div { class: "route-selector-field",
-                        label { "Active route" }
-                        {
-                            let mut route_opts = vec![DropdownOption::new("", "No active route")];
-                            for route in vn.routes.clone() {
-                                route_opts.push(DropdownOption::new(route.name.clone(), route.name.clone()));
-                            }
-                            let cur_route = vn.active_route.clone().unwrap_or_default();
-                            rsx! {
-                                Dropdown {
-                                    class: "drop-up".to_string(),
-                                    options: route_opts,
-                                    selected_value: cur_route,
-                                    on_select: move |val: String| {
-                                        let active_route = if val.is_empty() { None } else { Some(val) };
-                                        on_active_route_change.call((vn.id, active_route));
+                            div { class: "route-add-row",
+                                input {
+                                    class: if route_name_error_is_visible { "route-add-input field-invalid" } else { "route-add-input" },
+                                    placeholder: "New route name...",
+                                    value: "{typed_route_name}",
+                                    oninput: move |event| {
+                                        let value = event.value();
+                                        if !value.trim().is_empty() {
+                                            route_name_has_error.set(false);
+                                        }
+                                        new_route_name.set(event.value());
+                                    },
+                                    onkeydown: move |event: KeyboardEvent| {
+                                        if event.key() == Key::Enter {
+                                            let route_name = new_route_name.read().trim().to_string();
+                                            if route_name.is_empty() {
+                                                route_name_has_error.set(true);
+                                                return;
+                                            }
+                                            on_route_add.call((vn.id, route_name));
+                                            new_route_name.set(String::new());
+                                        }
                                     },
                                 }
+                                button {
+                                    class: "route-add-btn",
+                                    title: "Add route",
+                                    onclick: move |_| {
+                                        let route_name = new_route_name.read().trim().to_string();
+                                        if route_name.is_empty() {
+                                            route_name_has_error.set(true);
+                                            return;
+                                        }
+                                        on_route_add.call((vn.id, route_name));
+                                        new_route_name.set(String::new());
+                                    },
+                                    "+"
+                                }
                             }
-                        }
-                    }
-                    div { class: "route-list",
-                        for route in vn.routes.clone() {
-                            RouteItem {
-                                vn_id: vn.id,
-                                route,
-                                on_route_toggle,
-                                on_route_delete,
+                            if route_name_error_is_visible {
+                                p { class: "field-error", "Route name is required." }
+                            }
+                            if vn.routes.is_empty() {
+                                p { class: "stat-label", "No routes yet." }
+                            } else {
+                                div { class: "route-list",
+                                    for route in vn.routes.clone() {
+                                        {
+                                            let is_active = vn.active_route.as_deref() == Some(route.name.as_str());
+                                            rsx! {
+                                                RouteItem {
+                                                    vn_id: vn.id,
+                                                    route,
+                                                    is_active,
+                                                    on_route_toggle,
+                                                    on_route_set_active: on_active_route_change,
+                                                    on_route_delete,
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -938,7 +1063,7 @@ fn format_started_at(started_at: String) -> String {
         Ok(time) => time,
         Err(_error) => return started_at,
     };
-    parsed_time.format("%Y-%m-%d %H:%M:%S").to_string()
+    parsed_time.format("%Y-%m-%d %H:%M").to_string()
 }
 
 fn format_playtime(total_seconds: u64) -> String {
@@ -1032,29 +1157,61 @@ fn SpoilerText(parts: Vec<DescriptionPart>) -> Element {
 fn RouteItem(
     vn_id: u64,
     route: StoryRoute,
+    is_active: bool,
     on_route_toggle: EventHandler<(u64, String)>,
+    on_route_set_active: EventHandler<(u64, Option<String>)>,
     on_route_delete: EventHandler<(u64, String)>,
 ) -> Element {
+    let route_name = route.name.clone();
     let route_name_for_toggle = route.name.clone();
+    let route_name_for_active = route.name.clone();
     let route_name_for_delete = route.name.clone();
+    let item_class = if is_active {
+        "route-item active"
+    } else {
+        "route-item"
+    };
+    let name_class = if route.completed {
+        "route-name completed"
+    } else {
+        "route-name"
+    };
+
     rsx! {
-        label { class: "route-item",
+        div { class: "{item_class}",
             input {
                 class: "route-checkbox",
                 r#type: "checkbox",
                 checked: route.completed,
+                title: if route.completed { "Mark as incomplete" } else { "Mark as completed" },
                 onchange: move |_| {
                     on_route_toggle.call((vn_id, route_name_for_toggle.clone()));
                 },
             }
-            span { class: "route-name", "{route.name}" }
+            button {
+                class: "route-name-btn",
+                r#type: "button",
+                title: if is_active { "Clear active route" } else { "Set as active route" },
+                onclick: move |_| {
+                    if is_active {
+                        on_route_set_active.call((vn_id, None));
+                    } else {
+                        on_route_set_active.call((vn_id, Some(route_name_for_active.clone())));
+                    }
+                },
+                span { class: "{name_class}", "{route_name}" }
+                if is_active {
+                    span { class: "route-active-badge", "Playing" }
+                }
+            }
             button {
                 class: "route-delete-button",
+                r#type: "button",
                 title: "Delete route",
                 onclick: move |_| {
                     on_route_delete.call((vn_id, route_name_for_delete.clone()));
                 },
-                "🗑"
+                "✕"
             }
         }
     }

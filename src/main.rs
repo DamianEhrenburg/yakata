@@ -44,7 +44,6 @@ use std::time::Instant;
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const BG_IMAGE: Asset = asset!("/assets/yakata_bg.jpg");
 const LOGO_IMAGE: Asset = asset!("/assets/yakatalogo.png");
-const STARS_IMAGE: Asset = asset!("/assets/stars.jpg");
 
 fn main() {
     let config = Config::new()
@@ -52,7 +51,6 @@ fn main() {
         .with_window(
         WindowBuilder::new()
             .with_title("Yakata")
-            .with_maximized(true)
             .with_inner_size(LogicalSize::new(1340.0, 840.0))
             .with_min_inner_size(LogicalSize::new(960.0, 640.0))
             .with_decorations(false),
@@ -123,6 +121,7 @@ fn App() -> Element {
     };
 
     let saved_library_sort_mode = saved_settings.library_sort_mode.clone();
+    let saved_sort_descending = saved_settings.library_sort_descending;
     let saved_favourites_only = saved_settings.filter_favourites_only
         || matches!(saved_settings.library_filter_mode, LibraryFilterMode::Favourites);
     let saved_status_filter = saved_settings.filter_status.or(match saved_settings.library_filter_mode {
@@ -140,6 +139,8 @@ fn App() -> Element {
 
     let mut library_sort_mode = use_signal(|| saved_library_sort_mode);
     let selected_sort_mode = library_sort_mode.read().clone();
+    let mut sort_descending = use_signal(|| saved_sort_descending);
+    let is_sort_descending = *sort_descending.read();
 
     let mut favourites_only = use_signal(|| saved_favourites_only);
     let is_favourites_only = *favourites_only.read();
@@ -190,6 +191,17 @@ fn App() -> Element {
         tx
     });
 
+    let available_update = use_signal(|| None::<String>);
+    use_hook(|| {
+        let mut update_signal = available_update;
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+            if let Some(tag) = system::check_latest_github_release().await {
+                update_signal.set(Some(tag));
+            }
+        });
+    });
+
     let mut current_view = use_signal(|| AppView::Library);
     let selected_view = current_view.read().clone();
 
@@ -228,24 +240,43 @@ fn App() -> Element {
 
     match selected_sort_mode {
         LibrarySortMode::Added => {
-            filtered_vns.sort_by(|a, b| b.id.cmp(&a.id));
+            if is_sort_descending {
+                filtered_vns.sort_by(|a, b| b.id.cmp(&a.id));
+            } else {
+                filtered_vns.sort_by(|a, b| a.id.cmp(&b.id));
+            }
         }
         LibrarySortMode::RatingDesc => {
-            filtered_vns.sort_by(|a, b| b.rating.unwrap_or(0).cmp(&a.rating.unwrap_or(0)));
+            if is_sort_descending {
+                filtered_vns.sort_by(|a, b| b.rating.unwrap_or(0).cmp(&a.rating.unwrap_or(0)));
+            } else {
+                filtered_vns.sort_by(|a, b| a.rating.unwrap_or(0).cmp(&b.rating.unwrap_or(0)));
+            }
         }
-        LibrarySortMode::TitleAsc => {
-            filtered_vns.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
-        }
-        LibrarySortMode::TitleDesc => {
-            filtered_vns.sort_by(|a, b| b.title.to_lowercase().cmp(&a.title.to_lowercase()));
+        LibrarySortMode::TitleAsc | LibrarySortMode::TitleDesc => {
+            if is_sort_descending {
+                filtered_vns.sort_by(|a, b| b.title.to_lowercase().cmp(&a.title.to_lowercase()));
+            } else {
+                filtered_vns.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            }
         }
         LibrarySortMode::LastPlayed => {
-            filtered_vns.sort_by(|a, b| latest_played_at(b).cmp(&latest_played_at(a)));
+            if is_sort_descending {
+                filtered_vns.sort_by(|a, b| latest_played_at(b).cmp(&latest_played_at(a)));
+            } else {
+                filtered_vns.sort_by(|a, b| latest_played_at(a).cmp(&latest_played_at(b)));
+            }
         }
         LibrarySortMode::MostPlaytime => {
-            filtered_vns.sort_by(|a, b| total_playtime_seconds(b).cmp(&total_playtime_seconds(a)));
+            if is_sort_descending {
+                filtered_vns.sort_by(|a, b| total_playtime_seconds(b).cmp(&total_playtime_seconds(a)));
+            } else {
+                filtered_vns.sort_by(|a, b| total_playtime_seconds(a).cmp(&total_playtime_seconds(b)));
+            }
         }
     }
+
+    let total_library_count = vns.read().len();
 
     let desktop = dioxus::desktop::window();
     let drag_win = desktop.clone();
@@ -281,9 +312,12 @@ fn App() -> Element {
         .as_ref()
         .and_then(|p| local_path_to_data_url(p));
     let bg_style = match custom_bg_url {
-        Some(url) => format!("--app-bg-image: url('{url}'); --stars-image: url('{STARS_IMAGE}');"),
-        None => format!("--app-bg-image: url('{BG_IMAGE}'); --stars-image: url('{STARS_IMAGE}');"),
+        Some(url) => format!("--app-bg-image: url('{url}');"),
+        None => format!("--app-bg-image: url('{BG_IMAGE}');"),
     };
+
+    let session_tx_for_launch = session_tx.clone();
+    let session_tx_for_add = session_tx.clone();
 
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
@@ -313,7 +347,7 @@ fn App() -> Element {
                 direction: ResizeDirection::NorthWest,
             }
 
-            div { class: "star-overlay" }
+            div { class: "ambient-overlay" }
 
             div { class: "win-titlebar",
 
@@ -405,14 +439,28 @@ fn App() -> Element {
 
                             "Library"
                         }
-                        button {
-                            class: if selected_view == AppView::Settings { "nav-item active" } else { "nav-item" },
+                        div { class: "sidebar-bottom",
+                            if let Some(ref tag) = *available_update.read() {
+                                div { class: "sidebar-update-wrapper",
+                                    button {
+                                        class: "sidebar-update-item",
+                                        title: "Open release page on GitHub",
+                                        onclick: move |_| {
+                                            let _ = system::open_url("https://github.com/DamianEhrenburg/yakata/releases/latest");
+                                        },
+                                        "Update {tag}"
+                                    }
+                                }
+                            }
+                            button {
+                                class: if selected_view == AppView::Settings { "nav-item active" } else { "nav-item" },
 
-                            onclick: move |_| {
-                                current_view.set(AppView::Settings);
-                            },
+                                onclick: move |_| {
+                                    current_view.set(AppView::Settings);
+                                },
 
-                            "Settings"
+                                "Settings"
+                            }
                         }
                     }
                 }
@@ -435,37 +483,51 @@ fn App() -> Element {
                             div { class: "topbar-select-field sort-field",
                                 span { class: "topbar-select-label", "Sort by" }
 
-                                Dropdown {
-                                    options: vec![
-                                        DropdownOption::new("added", "Added"),
-                                        DropdownOption::new("rating-desc", "Rating"),
-                                        DropdownOption::new("title-asc", "A-Z"),
-                                        DropdownOption::new("title-desc", "Z-A"),
-                                        DropdownOption::new("last-played", "Last Played"),
-                                        DropdownOption::new("most-playtime", "Most Playtime"),
-                                    ],
-                                    selected_value: match selected_sort_mode {
-                                        LibrarySortMode::Added => "added",
-                                        LibrarySortMode::RatingDesc => "rating-desc",
-                                        LibrarySortMode::TitleAsc => "title-asc",
-                                        LibrarySortMode::TitleDesc => "title-desc",
-                                        LibrarySortMode::LastPlayed => "last-played",
-                                        LibrarySortMode::MostPlaytime => "most-playtime",
-                                    }.to_string(),
-                                    on_select: move |val: String| {
-                                        let sort_mode = match val.as_str() {
-                                            "rating-desc" => LibrarySortMode::RatingDesc,
-                                            "title-asc" => LibrarySortMode::TitleAsc,
-                                            "title-desc" => LibrarySortMode::TitleDesc,
-                                            "last-played" => LibrarySortMode::LastPlayed,
-                                            "most-playtime" => LibrarySortMode::MostPlaytime,
-                                            _ => LibrarySortMode::Added,
-                                        };
+                                div { class: "topbar-sort-group",
+                                    Dropdown {
+                                        options: vec![
+                                            DropdownOption::new("added", "Added"),
+                                            DropdownOption::new("title", "Title"),
+                                            DropdownOption::new("rating", "Rating"),
+                                            DropdownOption::new("last-played", "Last Played"),
+                                            DropdownOption::new("most-playtime", "Playtime"),
+                                        ],
+                                        selected_value: match selected_sort_mode {
+                                            LibrarySortMode::Added => "added",
+                                            LibrarySortMode::RatingDesc => "rating",
+                                            LibrarySortMode::TitleAsc | LibrarySortMode::TitleDesc => "title",
+                                            LibrarySortMode::LastPlayed => "last-played",
+                                            LibrarySortMode::MostPlaytime => "most-playtime",
+                                        }.to_string(),
+                                        on_select: move |val: String| {
+                                            let (sort_mode, default_desc) = match val.as_str() {
+                                                "rating" => (LibrarySortMode::RatingDesc, true),
+                                                "title" => (LibrarySortMode::TitleAsc, false),
+                                                "last-played" => (LibrarySortMode::LastPlayed, true),
+                                                "most-playtime" => (LibrarySortMode::MostPlaytime, true),
+                                                _ => (LibrarySortMode::Added, true),
+                                            };
 
-                                        library_sort_mode.set(sort_mode.clone());
-                                        settings.write().library_sort_mode = sort_mode;
-                                        save_settings_or_log(&settings);
-                                    },
+                                            sort_descending.set(default_desc);
+                                            library_sort_mode.set(sort_mode.clone());
+                                            settings.write().library_sort_mode = sort_mode;
+                                            settings.write().library_sort_descending = default_desc;
+                                            save_settings_or_log(&settings);
+                                        },
+                                    }
+
+                                    button {
+                                        class: "topbar-sort-direction-btn",
+                                        r#type: "button",
+                                        title: if is_sort_descending { "Sort descending" } else { "Sort ascending" },
+                                        onclick: move |_| {
+                                            let new_dir = !*sort_descending.read();
+                                            sort_descending.set(new_dir);
+                                            settings.write().library_sort_descending = new_dir;
+                                            save_settings_or_log(&settings);
+                                        },
+                                        if is_sort_descending { "▼" } else { "▲" }
+                                    }
                                 }
                             }
 
@@ -561,7 +623,8 @@ fn App() -> Element {
                     }
 
                     if selected_view == AppView::Library {
-                        div { class: "app-layout",
+                        div {
+                            class: if total_library_count == 0 { "app-layout empty-library-mode" } else { "app-layout" },
                             section { class: "library-column",
 
                                 if *show_add_form.read() {
@@ -606,9 +669,9 @@ fn App() -> Element {
                                                         is_favourite: false,
                                                         tags: new_vn.tags,
                                                         cover_path: new_vn.cover_path,
-                                                        executable_path: None,
-                                                        launch_mode: LaunchMode::default(),
-                                                        steam_app_id: None,
+                                                        executable_path: new_vn.executable_path,
+                                                        launch_mode: new_vn.launch_mode,
+                                                        steam_app_id: new_vn.steam_app_id,
                                                         wine_binary: None,
                                                         wine_prefix: None,
                                                         wine_locale: None,
@@ -624,7 +687,7 @@ fn App() -> Element {
                                                         rating: new_vn.rating,
                                                         vndb_id: new_vn.vndb_id,
                                                         game_folder: None,
-                                                        run_with_locale_emulator: false,
+                                                        run_with_locale_emulator: new_vn.run_with_locale_emulator,
                                                         is_nsfw: new_vn.is_nsfw,
                                                     };
 
@@ -636,6 +699,7 @@ fn App() -> Element {
                                                         spawn(async move {
                                                             match cache_cover_image(next_id, cover_url).await {
                                                                 Ok(cover_path) => {
+                                                                    invalidate_cover_cache(&cover_path);
                                                                     for vn in vns_for_cover
                                                                         .write()
                                                                         .iter_mut()
@@ -672,6 +736,7 @@ fn App() -> Element {
 
                                 LibraryView {
                                     vns: filtered_vns,
+                                    total_vns_count: vns.read().len(),
                                     selected_vn_id: selected_vn_id_value,
                                     blur_nsfw: settings.read().blur_nsfw,
 
@@ -690,12 +755,28 @@ fn App() -> Element {
                                             "Could not save favourite".to_string(),
                                         );
                                     },
+
+                                    on_open_add_form: move |_| {
+                                        show_add_form.set(true);
+                                    },
+
+                                    on_reset_filters: move |_| {
+                                        search_query.set(String::new());
+                                        favourites_only.set(false);
+                                        selected_status_filter.set(None);
+                                        selected_tag_filter.set(None);
+                                        settings.write().filter_favourites_only = false;
+                                        settings.write().filter_status = None;
+                                        settings.write().library_filter_mode = LibraryFilterMode::All;
+                                        save_settings_or_log(&settings);
+                                    },
                                 }
                             }
 
-                            aside { class: "detail-column",
-                                if let Some(vn) = selected_vn {
-                                    DetailView {
+                            if total_library_count > 0 {
+                                aside { class: "detail-column",
+                                    if let Some(vn) = selected_vn {
+                                        DetailView {
                                         key: "{vn.id}",
                                         vn,
                                         blur_nsfw: settings.read().blur_nsfw,
@@ -853,6 +934,13 @@ fn App() -> Element {
                                                         .as_deref()
                                                         .filter(|f| !f.trim().is_empty())
                                                         .map(std::path::PathBuf::from)
+                                                })
+                                                .or_else(|| {
+                                                    if vn.launch_mode == LaunchMode::Steam {
+                                                        vn.steam_app_id.and_then(game_process::resolve_steam_game_folder)
+                                                    } else {
+                                                        None
+                                                    }
                                                 });
 
                                             let executable_path = vn.executable_path.clone().unwrap_or_default();
@@ -900,7 +988,7 @@ fn App() -> Element {
                                                     } else {
                                                         None
                                                     };
-                                                    let thread_session_tx = session_tx.clone();
+                                                    let thread_session_tx = session_tx_for_launch.clone();
                                                     thread::spawn(move || {
                                                         let wait_result = game_process::wait_for_game_exit(child, game_folder, is_steam);
                                                         if let Some(log_path) = launch_log_path {
@@ -1163,6 +1251,11 @@ fn App() -> Element {
                                         },
 
                                         on_delete: move |id| {
+                                            let deleted_cover = vns.read().iter().find(|vn| vn.id == id).and_then(|vn| vn.cover_path.clone());
+                                            if let Some(ref path) = deleted_cover {
+                                                invalidate_cover_cache(path);
+                                                let _ = std::fs::remove_file(path);
+                                            }
                                             vns.write().retain(|vn| vn.id != id);
 
                                             if selected_vn_id_value == Some(id) {
@@ -1408,18 +1501,42 @@ fn App() -> Element {
                                                 "Could not save locale emulator setting".to_string(),
                                             );
                                         },
+
+                                        on_add_play_session: move |(id, duration_seconds, notes)| {
+                                            let play_session = PlaySession {
+                                                vn_id: id,
+                                                started_at: Utc::now().to_rfc3339(),
+                                                duration_seconds,
+                                                notes,
+                                            };
+                                            if let Err(err) = add_play_session_to_library(id, play_session.clone()) {
+                                                println!("Could not save manual play session: {err}");
+                                            }
+                                            let _ = session_tx_for_add.send((id, play_session));
+                                        },
+
+                                        on_delete_play_session: move |(id, session_index)| {
+                                            update_vn_and_save(
+                                                &mut vns,
+                                                id,
+                                                move |vn| {
+                                                    if session_index < vn.play_sessions.len() {
+                                                        vn.play_sessions.remove(session_index);
+                                                    }
+                                                },
+                                                "Could not delete play session".to_string(),
+                                            );
+                                        },
                                     }
                                 } else {
                                     section { class: "empty-detail-panel",
-
-                                        h2 { "No VN selected" }
-                                        p {
-                                            "Choose a visual novel from the library to view notes, routes, launch settings, and play sessions."
-                                        }
+                                        h2 { "No visual novel selected" }
+                                        p { "Select a visual novel from the library to view details." }
                                     }
                                 }
                             }
                         }
+                    }
                     } else {
                         SettingsView {
                             discord_rich_presence_enabled: settings.read().discord_rich_presence_enabled,
