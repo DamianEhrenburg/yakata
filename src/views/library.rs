@@ -34,7 +34,8 @@ pub fn LibraryView(
                 }
             } else if vns.is_empty() {
                 div { class: "library-empty-state",
-                    p { "No visual novels match the active filters." }
+                    h3 { "No visual novels found" }
+                    p { "No visual novels match the active search or filters." }
                     button {
                         class: "library-empty-button",
                         onclick: move |_| on_reset_filters.call(()),

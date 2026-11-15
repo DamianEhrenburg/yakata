@@ -276,7 +276,7 @@ fn App() -> Element {
         }
     }
 
-    let total_library_count = vns.read().len();
+    let is_filtered_empty = filtered_vns.is_empty();
 
     let desktop = dioxus::desktop::window();
     let drag_win = desktop.clone();
@@ -624,7 +624,7 @@ fn App() -> Element {
 
                     if selected_view == AppView::Library {
                         div {
-                            class: if total_library_count == 0 { "app-layout empty-library-mode" } else { "app-layout" },
+                            class: if is_filtered_empty { "app-layout empty-library-mode" } else { "app-layout" },
                             section { class: "library-column",
 
                                 if *show_add_form.read() {
@@ -773,7 +773,7 @@ fn App() -> Element {
                                 }
                             }
 
-                            if total_library_count > 0 {
+                            if !is_filtered_empty {
                                 aside { class: "detail-column",
                                     if let Some(vn) = selected_vn {
                                         DetailView {
