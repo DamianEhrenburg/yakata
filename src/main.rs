@@ -23,7 +23,7 @@ use models::{
     NotificationLevel, NovelStatus, PlaySession, StoryRoute, VisualNovel, default_umu_game_id,
 };
 use storage::{
-    add_play_session_to_library, yakata_data_dir, load_library, load_settings, save_library,
+    yakata_data_dir, load_library, load_settings, save_library,
     save_settings,
 };
 use system::{is_flatpak_document_portal_path, open_folder, umu_launcher_is_available};
@@ -90,6 +90,15 @@ fn ResizeHandle(class: String, direction: ResizeDirection) -> Element {
             },
         }
     }
+}
+
+#[derive(Debug)]
+enum SaveJob {
+    Library {
+        data: Vec<VisualNovel>,
+        error_message: String,
+    },
+    Settings(AppSettings),
 }
 
 #[component]
@@ -161,6 +170,44 @@ fn App() -> Element {
             None
         }
     });
+    let save_tx = use_hook(|| {
+        provide_context(notification);
+
+        let (job_tx, job_rx) = std::sync::mpsc::channel::<SaveJob>();
+        let (err_tx, mut err_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+
+        std::thread::spawn(move || {
+            while let Ok(job) = job_rx.recv() {
+                match job {
+                    SaveJob::Library { data, error_message } => {
+                        if let Err(error) = save_library(data) {
+                            eprintln!("{error_message}: {error}");
+                            let _ = err_tx.send(format!("{error_message}: {error}"));
+                        }
+                    }
+                    SaveJob::Settings(settings) => {
+                        if let Err(error) = save_settings(settings) {
+                            eprintln!("Could not save settings: {error}");
+                            let _ = err_tx.send(format!("Could not save settings: {error}"));
+                        }
+                    }
+                }
+            }
+        });
+
+        let mut error_notification = notification;
+        spawn(async move {
+            while let Some(error_message) = err_rx.recv().await {
+                error_notification.set(Some(AppNotification {
+                    level: NotificationLevel::Error,
+                    message: error_message,
+                }));
+            }
+        });
+
+        provide_context(job_tx.clone());
+        job_tx
+    });
 
     let mut notification_token = use_signal(|| 0u64);
     use_effect(move || {
@@ -176,15 +223,26 @@ fn App() -> Element {
         }
     });
 
+    let save_tx_for_sessions = save_tx.clone();
     let session_tx = use_hook(|| {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(u64, PlaySession)>();
         let mut vns_signal = vns;
+        let save_tx = save_tx_for_sessions;
         spawn(async move {
             while let Some((vn_id, session)) = rx.recv().await {
+                let mut found = false;
                 for vn in vns_signal.write().iter_mut() {
                     if vn.id == vn_id {
                         vn.play_sessions.push(session.clone());
+                        found = true;
+                        break;
                     }
+                }
+                if found {
+                    let _ = save_tx.send(SaveJob::Library {
+                        data: vns_signal.read().clone(),
+                        error_message: "Could not save play session".to_string(),
+                    });
                 }
             }
         });
@@ -284,10 +342,10 @@ fn App() -> Element {
     let max_win = desktop.clone();
     let close_win = desktop.clone();
 
-    let data_dir_text = match yakata_data_dir() {
+    let data_dir_text = use_hook(|| match yakata_data_dir() {
         Ok(path) => path.display().to_string(),
         Err(error) => format!("Could not find data folder: {error}"),
-    };
+    });
 
     let wine_runners = use_hook(wine::detect_wine_runners);
     let proton_runners = use_hook(wine::detect_proton_runners);
@@ -317,7 +375,6 @@ fn App() -> Element {
     };
 
     let session_tx_for_launch = session_tx.clone();
-    let session_tx_for_add = session_tx.clone();
 
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
@@ -708,24 +765,20 @@ fn App() -> Element {
                                                                             vn.cover_path = Some(cover_path.clone());
                                                                         }
                                                                     }
-                                                                    let save_result = save_library(vns_for_cover.read().clone());
-                                                                    if let Err(error) = save_result {
-                                                                        println!("Could not save cached cover path: {error}");
-                                                                    }
+                                                                    save_vns_or_log(
+                                                                        &vns_for_cover,
+                                                                        "Could not save cached cover path".to_string(),
+                                                                    );
                                                                 }
 
                                                                 Err(error) => {
-                                                                    println!("Could not cache cover image: {error}");
+                                                                    eprintln!("Could not cache cover image: {error}");
                                                                 }
                                                             }
                                                         });
                                                     }
 
-                                                    let save_result = save_library(vns.read().clone());
-
-                                                    if let Err(error) = save_result {
-                                                        println!("Could not save library: {error}");
-                                                    }
+                                                    save_vns_or_log(&vns, "Could not save library".to_string());
 
                                                     show_add_form.set(false);
                                                 },
@@ -1007,21 +1060,10 @@ fn App() -> Element {
                                                                     duration_seconds,
                                                                     notes: None,
                                                                 };
-                                                                let save_result = add_play_session_to_library(
-                                                                    vn_id,
-                                                                    play_session.clone(),
+                                                                println!(
+                                                                    "VN {vn_id} closed after {duration_seconds} seconds.",
                                                                 );
-                                                                match save_result {
-                                                                    Ok(()) => {
-                                                                        println!(
-                                                                            "VN {vn_id} closed after {duration_seconds} seconds and was saved.",
-                                                                        );
-                                                                        let _ = thread_session_tx.send((vn_id, play_session));
-                                                                    }
-                                                                    Err(error) => {
-                                                                        println!("Could not save measured play session: {error}");
-                                                                    }
-                                                                }
+                                                                let _ = thread_session_tx.send((vn_id, play_session));
                                                             }
                                                             Err(error) => {
                                                                 println!("Could not monitor VN process: {error}");
@@ -1252,9 +1294,17 @@ fn App() -> Element {
 
                                         on_delete: move |id| {
                                             let deleted_cover = vns.read().iter().find(|vn| vn.id == id).and_then(|vn| vn.cover_path.clone());
-                                            if let Some(ref path) = deleted_cover {
-                                                invalidate_cover_cache(path);
-                                                let _ = std::fs::remove_file(path);
+                                            if let Some(ref path_str) = deleted_cover {
+                                                invalidate_cover_cache(path_str);
+                                                if let Ok(cache_dir) = covers::cover_cache_dir()
+                                                    && let (Ok(file_canon), Ok(cache_canon)) = (
+                                                        std::path::Path::new(path_str).canonicalize(),
+                                                        cache_dir.canonicalize(),
+                                                    )
+                                                    && file_canon.starts_with(&cache_canon)
+                                                {
+                                                    let _ = std::fs::remove_file(&file_canon);
+                                                }
                                             }
                                             vns.write().retain(|vn| vn.id != id);
 
@@ -1509,10 +1559,14 @@ fn App() -> Element {
                                                 duration_seconds,
                                                 notes,
                                             };
-                                            if let Err(err) = add_play_session_to_library(id, play_session.clone()) {
-                                                println!("Could not save manual play session: {err}");
-                                            }
-                                            let _ = session_tx_for_add.send((id, play_session));
+                                            update_vn_and_save(
+                                                &mut vns,
+                                                id,
+                                                move |vn| {
+                                                    vn.play_sessions.push(play_session);
+                                                },
+                                                "Could not save play session".to_string(),
+                                            );
                                         },
 
                                         on_delete_play_session: move |(id, session_index)| {
@@ -1635,7 +1689,7 @@ fn App() -> Element {
                                     .set_file_name("yakata_library_backup.json")
                                     .save_file();
                                 if let Some(path) = picked_file {
-                                    match storage::export_library_backup(&path) {
+                                    match storage::export_library_backup(&path, &vns.read()) {
                                         Ok(()) => {
                                             notification.set(Some(AppNotification {
                                                 level: NotificationLevel::Info,
@@ -1703,18 +1757,21 @@ fn update_vn_and_save(
 }
 
 fn save_vns_or_log(vns: &Signal<Vec<VisualNovel>>, error_message: String) {
-    let save_result = save_library(vns.read().clone());
-
-    if let Err(error) = save_result {
-        println!("{error_message}: {error}");
+    if let Some(tx) = try_consume_context::<std::sync::mpsc::Sender<SaveJob>>() {
+        let _ = tx.send(SaveJob::Library {
+            data: vns.read().clone(),
+            error_message,
+        });
+    } else if let Err(error) = save_library(vns.read().clone()) {
+        eprintln!("{error_message}: {error}");
     }
 }
 
 fn save_settings_or_log(settings: &Signal<AppSettings>) {
-    let save_result = save_settings(settings.read().clone());
-
-    if let Err(error) = save_result {
-        println!("Could not save settings: {error}");
+    if let Some(tx) = try_consume_context::<std::sync::mpsc::Sender<SaveJob>>() {
+        let _ = tx.send(SaveJob::Settings(settings.read().clone()));
+    } else if let Err(error) = save_settings(settings.read().clone()) {
+        eprintln!("Could not save settings: {error}");
     }
 }
 

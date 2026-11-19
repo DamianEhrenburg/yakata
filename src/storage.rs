@@ -8,7 +8,21 @@ fn library_lock() -> &'static Mutex<()> {
     LOCK.get_or_init(|| Mutex::new(()))
 }
 
+fn settings_lock() -> &'static Mutex<()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
 pub fn yakata_data_dir() -> Result<PathBuf, io::Error> {
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent()
+        && exe_dir.join("portable.txt").exists()
+    {
+        let data_dir = exe_dir.join("data");
+        fs::create_dir_all(&data_dir)?;
+        return Ok(data_dir);
+    }
+
     let data_dir = match dirs::data_dir() {
         Some(path) => path,
         None => {
@@ -78,10 +92,8 @@ pub fn save_library(library: Vec<VisualNovel>) -> Result<(), io::Error> {
     write_library_unlocked(&library)
 }
 
-pub fn export_library_backup(dest_path: &Path) -> Result<(), io::Error> {
-    let _guard = library_lock().lock().unwrap_or_else(|e| e.into_inner());
-    let library = read_library_unlocked()?;
-    let json_text = serde_json::to_string_pretty(&library)?;
+pub fn export_library_backup(dest_path: &Path, library: &[VisualNovel]) -> Result<(), io::Error> {
+    let json_text = serde_json::to_string_pretty(library)?;
     fs::write(dest_path, json_text)?;
     Ok(())
 }
@@ -95,67 +107,12 @@ pub fn import_library_backup(src_path: &Path) -> Result<Vec<VisualNovel>, io::Er
     Ok(library)
 }
 
-#[allow(dead_code)]
-pub fn add_vn_to_library(vn: VisualNovel) -> Result<(), io::Error> {
-    let mut library = load_library()?;
-    library.push(vn);
-    save_library(library)?;
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn update_vn_in_library<F>(vn_id: u64, update_fn: F) -> Result<(), io::Error>
-where
-    F: FnOnce(&mut VisualNovel),
-{
-    let mut library = load_library()?;
-    if let Some(vn) = library.iter_mut().find(|vn| vn.id == vn_id) {
-        update_fn(vn);
-        save_library(library)?;
-        Ok(())
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("VN with ID {vn_id} not found in library"),
-        ))
-    }
-}
-
-#[allow(dead_code)]
-pub fn remove_vn_from_library(vn_id: u64) -> Result<(), io::Error> {
-    let mut library = load_library()?;
-    let initial_len = library.len();
-    library.retain(|vn| vn.id != vn_id);
-    if library.len() == initial_len {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("VN with ID {vn_id} not found in library"),
-        ));
-    }
-    save_library(library)?;
-    Ok(())
-}
-
-pub fn add_play_session_to_library(
-    vn_id: u64,
-    play_session: crate::models::PlaySession,
-) -> Result<(), io::Error> {
-    let _guard = library_lock().lock().unwrap_or_else(|e| e.into_inner());
-    let mut library = read_library_unlocked()?;
-    for vn in &mut library {
-        if vn.id == vn_id {
-            vn.play_sessions.push(play_session.clone());
-        }
-    }
-    write_library_unlocked(&library)?;
-    Ok(())
-}
-
 pub fn settings_file_path() -> Result<PathBuf, io::Error> {
     Ok(yakata_data_dir()?.join("settings.json"))
 }
 
 pub fn load_settings() -> Result<AppSettings, io::Error> {
+    let _guard = settings_lock().lock().unwrap_or_else(|e| e.into_inner());
     let settings_file = settings_file_path()?;
     let json_text = match fs::read_to_string(&settings_file) {
         Ok(text) => text,
@@ -176,6 +133,7 @@ pub fn load_settings() -> Result<AppSettings, io::Error> {
 }
 
 pub fn save_settings(settings: AppSettings) -> Result<(), io::Error> {
+    let _guard = settings_lock().lock().unwrap_or_else(|e| e.into_inner());
     let settings_file = settings_file_path()?;
     let settings_dir = match settings_file.parent() {
         Some(path) => path,
@@ -188,6 +146,8 @@ pub fn save_settings(settings: AppSettings) -> Result<(), io::Error> {
     };
     fs::create_dir_all(settings_dir)?;
     let json_text = serde_json::to_string_pretty(&settings)?;
-    fs::write(settings_file, json_text)?;
+    let temp_file = settings_file.with_extension("tmp");
+    fs::write(&temp_file, json_text)?;
+    fs::rename(&temp_file, &settings_file)?;
     Ok(())
 }

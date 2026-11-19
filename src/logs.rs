@@ -3,16 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 pub fn launch_logs_dir() -> Result<PathBuf, io::Error> {
-    let data_dir = match dirs::data_dir() {
-        Some(path) => path,
-        None => {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "Could not find an app data directory",
-            ));
-        }
-    };
-    let logs_dir = data_dir.join("yakata").join("logs");
+    let logs_dir = crate::storage::yakata_data_dir()?.join("logs");
     fs::create_dir_all(&logs_dir)?;
     Ok(logs_dir)
 }
