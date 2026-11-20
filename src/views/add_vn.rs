@@ -243,27 +243,27 @@ pub fn AddVnForm(
                                     if let Some(path) = picked_file {
                                         let path_str = path.to_string_lossy().to_string();
                                         executable_path.set(Some(path_str.clone()));
-                                        if title.read().trim().is_empty() {
-                                            if let Some(inferred) = infer_title_from_executable_path(&path_str) {
-                                                title.set(inferred.clone());
-                                                vndb_query.set(inferred.clone());
-                                                title_has_error.set(false);
-                                                loaded_result_id.set(None);
-                                                search_message.set("Searching VNDB...".to_string());
-                                                let current_sort = *vndb_sort.read();
-                                                let current_rev = *sort_reverse.read();
-                                                spawn(async move {
-                                                    match search_vns(inferred, current_sort, current_rev).await {
-                                                        Ok(results) => {
-                                                            search_message.set(format_results_count(results.len()));
-                                                            search_results.set(results);
-                                                        }
-                                                        Err(error) => {
-                                                            search_message.set(format!("VNDB search failed: {error}"));
-                                                        }
+                                        if title.read().trim().is_empty()
+                                            && let Some(inferred) = infer_title_from_executable_path(&path_str)
+                                        {
+                                            title.set(inferred.clone());
+                                            vndb_query.set(inferred.clone());
+                                            title_has_error.set(false);
+                                            loaded_result_id.set(None);
+                                            search_message.set("Searching VNDB...".to_string());
+                                            let current_sort = *vndb_sort.read();
+                                            let current_rev = *sort_reverse.read();
+                                            spawn(async move {
+                                                match search_vns(inferred, current_sort, current_rev).await {
+                                                    Ok(results) => {
+                                                        search_message.set(format_results_count(results.len()));
+                                                        search_results.set(results);
                                                     }
-                                                });
-                                            }
+                                                    Err(error) => {
+                                                        search_message.set(format!("VNDB search failed: {error}"));
+                                                    }
+                                                }
+                                            });
                                         }
                                     }
                                 },
@@ -334,12 +334,12 @@ pub fn AddVnForm(
                                 search_message.set(format!("\"{}\" is already in your library.", typed_title));
                                 return;
                             }
-                            if let Some(loaded_id) = loaded_result_id.read().as_ref() {
-                                if existing_vndb_ids.iter().any(|id| id.eq_ignore_ascii_case(loaded_id)) {
-                                    title_has_error.set(true);
-                                    search_message.set("This visual novel is already in your library.".to_string());
-                                    return;
-                                }
+                            if let Some(loaded_id) = loaded_result_id.read().as_ref()
+                                && existing_vndb_ids.iter().any(|id| id.eq_ignore_ascii_case(loaded_id))
+                            {
+                                title_has_error.set(true);
+                                search_message.set("This visual novel is already in your library.".to_string());
+                                return;
                             }
                             let final_steam_app_id = if *launch_mode.read() == LaunchMode::Steam {
                                 crate::launcher::parse_steam_app_id(&steam_app_id.read())

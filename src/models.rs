@@ -1,18 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::cmp::PartialEq;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum LaunchMode {
+    #[default]
     Native,
     Wine,
     Proton,
     Steam,
-}
-
-impl Default for LaunchMode {
-    fn default() -> Self {
-        LaunchMode::Native
-    }
 }
 
 pub fn default_umu_game_id() -> String {
@@ -185,8 +180,9 @@ pub struct AppNotification {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum LibrarySortMode {
+    #[default]
     Added,
     TitleAsc,
     TitleDesc,
@@ -195,23 +191,12 @@ pub enum LibrarySortMode {
     RatingDesc,
 }
 
-impl Default for LibrarySortMode {
-    fn default() -> Self {
-        LibrarySortMode::Added
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum LibraryFilterMode {
+    #[default]
     All,
     Favourites,
     Status(NovelStatus),
-}
-
-impl Default for LibraryFilterMode {
-    fn default() -> Self {
-        LibraryFilterMode::All
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

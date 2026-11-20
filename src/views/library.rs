@@ -149,10 +149,10 @@ pub fn is_vn_nsfw(vn: &VisualNovel) -> bool {
 }
 
 pub fn cover_source(vn: VisualNovel) -> Option<String> {
-    if let Some(path) = vn.cover_path {
-        if let Some(data_url) = local_cover_source(path) {
-            return Some(data_url);
-        }
+    if let Some(path) = vn.cover_path
+        && let Some(data_url) = local_cover_source(path)
+    {
+        return Some(data_url);
     }
     vn.cover_url
 }
@@ -173,10 +173,10 @@ pub fn invalidate_cover_cache(path: &str) {
 }
 
 pub fn local_path_to_data_url(path: &str) -> Option<String> {
-    if let Ok(cache) = data_url_cache().lock() {
-        if let Some(cached) = cache.get(path) {
-            return Some(cached.clone());
-        }
+    if let Ok(cache) = data_url_cache().lock()
+        && let Some(cached) = cache.get(path)
+    {
+        return Some(cached.clone());
     }
     let image_bytes = fs::read(path).ok()?;
     let mime_type = image_mime_type(path);

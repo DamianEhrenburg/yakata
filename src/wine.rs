@@ -26,7 +26,7 @@ pub fn detect_wine_runners() -> Vec<WineRunner> {
     let mut runners = Vec::new();
     add_path_wine_runners(&mut runners);
     let home_dir = match host_home_dir() {
-        Some(home) => PathBuf::from(home),
+        Some(home) => home,
         None => return runners,
     };
     let runner_directories = [
@@ -44,7 +44,7 @@ pub fn detect_wine_runners() -> Vec<WineRunner> {
 pub fn detect_proton_runners() -> Vec<ProtonRunner> {
     let mut runners = Vec::new();
     let home_dir = match host_home_dir() {
-        Some(home) => PathBuf::from(home),
+        Some(home) => home,
         None => return runners,
     };
     let proton_directories = [

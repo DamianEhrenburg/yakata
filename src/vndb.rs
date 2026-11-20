@@ -158,10 +158,7 @@ pub fn filter_vndb_tags(tags: &[VndbTag], is_nsfw: bool) -> Vec<String> {
                 return false;
             }
             let lower = t.name.to_lowercase();
-            if SPOILER_STOPWORDS.iter().any(|&stop| lower.contains(stop)) {
-                return false;
-            }
-            true
+            !SPOILER_STOPWORDS.iter().any(|&stop| lower.contains(stop))
         })
         .cloned()
         .collect();

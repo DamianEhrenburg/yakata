@@ -28,9 +28,7 @@ pub fn new_launch_log_path(vn_id: u64, vn_title: String) -> Result<PathBuf, io::
 fn safe_filename(title: String) -> String {
     let mut safe = String::new();
     for character in title.chars().take(48) {
-        if character.is_ascii_alphanumeric() {
-            safe.push(character);
-        } else if character == '-' || character == '_' {
+        if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
             safe.push(character);
         } else if character.is_whitespace() {
             safe.push('-');
