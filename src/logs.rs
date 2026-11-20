@@ -42,3 +42,21 @@ fn safe_filename(title: String) -> String {
         safe
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_safe_filename() {
+        assert_eq!(safe_filename("Hello World".to_string()), "Hello-World");
+        assert_eq!(safe_filename("Fate/stay night (魔法使い)".to_string()), "Fate_stay-night-______");
+
+        let long_title = "a".repeat(100);
+        let result = safe_filename(long_title);
+        assert_eq!(result.len(), 48);
+        assert_eq!(result, "a".repeat(48));
+
+        assert_eq!(safe_filename("".to_string()), "untitled");
+    }
+}

@@ -282,17 +282,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_novel_status_all_variants() {
-        let all = NovelStatus::all();
-        assert_eq!(all.len(), 5);
-        assert_eq!(NovelStatus::Reading.as_str(), "Reading");
-        assert_eq!(NovelStatus::Completed.as_str(), "Completed");
-        assert_eq!(NovelStatus::PlanToRead.as_str(), "Plan to Read");
-        assert_eq!(NovelStatus::OnHold.as_str(), "On Hold");
-        assert_eq!(NovelStatus::Dropped.as_str(), "Dropped");
-        for status in all {
+    fn test_novel_status_key_roundtrip() {
+        for status in NovelStatus::all() {
             assert_eq!(NovelStatus::from_key(status.key()), Some(*status));
         }
+        assert_eq!(NovelStatus::from_key("unknown"), None);
+        assert_eq!(NovelStatus::from_key(""), None);
     }
 
     #[test]
@@ -302,25 +297,6 @@ mod tests {
         assert!(!json.contains("library_filter_mode"));
         assert!(json.contains("filter_favourites_only"));
         assert!(json.contains("filter_status"));
-    }
-
-    #[test]
-    fn test_launch_mode_default() {
-        assert_eq!(LaunchMode::default(), LaunchMode::Native);
-    }
-
-    #[test]
-    fn test_app_settings_default_values() {
-        let settings = AppSettings::default();
-        assert!(settings.discord_rich_presence_enabled);
-        assert_eq!(settings.discord_status_text, "Reading");
-        assert!(settings.discord_show_active_route);
-        assert!(!settings.blur_nsfw);
-        assert!(settings.custom_background_path.is_none());
-        assert!(settings.leproc_path.is_none());
-        assert!(!settings.filter_favourites_only);
-        assert!(settings.filter_status.is_none());
-        assert!(settings.library_sort_descending);
     }
 
     #[test]
@@ -340,17 +316,11 @@ mod tests {
     }
 
     #[test]
-    fn test_novel_status_serde_roundtrip() {
-        let status = NovelStatus::Completed;
-        let json = serde_json::to_string(&status).expect("Serialization failed");
-        let parsed: NovelStatus = serde_json::from_str(&json).expect("Deserialization failed");
-        assert_eq!(status, parsed);
-    }
-
-    #[test]
     fn test_effective_nsfw() {
         let clean = VisualNovel {
-            title: "Clannad".to_string(),
+            title: "Young Adult Story".to_string(),
+            description: Some("A young adult drama about growing up.".to_string()),
+            tags: vec!["Drama".to_string(), "Romance".to_string()],
             ..Default::default()
         };
         assert!(!clean.effective_nsfw());

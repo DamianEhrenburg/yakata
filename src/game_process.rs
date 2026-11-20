@@ -282,3 +282,41 @@ pub fn resolve_steam_game_folder(app_id: u32) -> Option<PathBuf> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_path() {
+        let norm = normalize_path("C:\\Games\\MyVN");
+        assert!(norm.ends_with('/'));
+        assert!(!norm.contains('\\'));
+        if cfg!(target_os = "windows") {
+            assert_eq!(norm, "c:/games/myvn/");
+        }
+        assert_eq!(normalize_path(""), "");
+    }
+
+    #[test]
+    fn test_is_inside_folder_prefix_collision() {
+        let folder = normalize_path("C:\\Games\\VN");
+        let inside = "C:\\Games\\VN\\bin\\game.exe";
+        let sibling = "C:\\Games\\VN2\\game.exe";
+
+        assert!(is_inside_folder(inside, &folder));
+        assert!(!is_inside_folder(sibling, &folder));
+    }
+
+    #[test]
+    fn test_game_folder_for() {
+        let explicit = game_folder_for(Some("C:\\Custom"), "C:\\Default\\game.exe");
+        assert_eq!(explicit, Some(PathBuf::from("C:\\Custom")));
+
+        let whitespace = game_folder_for(Some("   "), "C:\\Default\\game.exe");
+        assert_eq!(whitespace, Some(PathBuf::from("C:\\Default")));
+
+        let none = game_folder_for(None, "C:\\Default\\game.exe");
+        assert_eq!(none, Some(PathBuf::from("C:\\Default")));
+    }
+}

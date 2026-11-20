@@ -210,5 +210,6 @@ mod tests {
             percent_encode("Fate/stay night & hollow"),
             "Fate%2Fstay+night+%26+hollow"
         );
+        assert_eq!(percent_encode("桜"), "%E6%A1%9C");
     }
 }

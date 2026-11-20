@@ -453,5 +453,34 @@ mod tests {
     fn test_split_launch_arguments() {
         let args = split_launch_arguments("-foo \"bar baz\" 'qux quux' --flag");
         assert_eq!(args, vec!["-foo", "bar baz", "qux quux", "--flag"]);
+
+        assert!(split_launch_arguments("").is_empty());
+        assert!(split_launch_arguments("   ").is_empty());
+        let multi_space = split_launch_arguments("  -a    -b   --flag  ");
+        assert_eq!(multi_space, vec!["-a", "-b", "--flag"]);
+    }
+
+    #[test]
+    fn test_parse_launch_environment() {
+        let valid = r#"
+            # Comment line
+            KEY=value
+            OPTS=a=b
+
+            ANOTHER=test 123
+        "#;
+        let parsed = parse_launch_environment(valid.to_string()).unwrap();
+        assert_eq!(
+            parsed,
+            vec![
+                ("KEY".to_string(), "value".to_string()),
+                ("OPTS".to_string(), "a=b".to_string()),
+                ("ANOTHER".to_string(), "test 123".to_string()),
+            ]
+        );
+
+        assert!(parse_launch_environment("NO_EQUALS".to_string()).is_err());
+        assert!(parse_launch_environment("=value".to_string()).is_err());
+        assert!(parse_launch_environment("BAD KEY=1".to_string()).is_err());
     }
 }

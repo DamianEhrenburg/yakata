@@ -140,4 +140,27 @@ mod tests {
             ])]
         );
     }
+
+    #[test]
+    fn test_unclosed_tags_and_brackets() {
+        let cases = vec![
+            "[b]unclosed",
+            "[url=https://vndb.org/v1]no end",
+            "a [ b",
+        ];
+        for input in cases {
+            let parts = parse_description(input.to_string());
+            let mut extracted = String::new();
+            for part in parts {
+                match part {
+                    DescriptionPart::Text(s) => extracted.push_str(&s),
+                    DescriptionPart::Bold(s) => extracted.push_str(&s),
+                    DescriptionPart::Italic(s) => extracted.push_str(&s),
+                    DescriptionPart::Link { label, .. } => extracted.push_str(&label),
+                    DescriptionPart::Spoiler(_) => {}
+                }
+            }
+            assert_eq!(extracted, input);
+        }
+    }
 }
