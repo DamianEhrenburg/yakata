@@ -2,6 +2,28 @@
 
 All notable changes to Yakata are documented here.
 
+## [0.3.1] - 2026-11-20
+
+### Added
+- Portable mode via `portable.txt`, storing library, settings, covers, and logs in a local `data/` folder.
+- Direct VNDB lookup by ID, such as `v17`.
+- Browse button for selecting local cover images in the Add VN form.
+- `SHA256SUMS.txt` checksums in release artifacts.
+
+### Changed
+- Moved library saves, settings writes, and Discord Rich Presence off the UI thread.
+- Shared a single HTTP client with a 15-second timeout for VNDB requests and cover downloads.
+- Deepened the dark burgundy palette, removed excess glow shadows, and unified rating badge styling.
+- Improved folder title parsing for dots, version suffixes, and Japanese brackets.
+
+### Fixed
+- Deleting a visual novel no longer removes custom cover files located outside Yakata's cache.
+- Prevented play sessions from being overwritten when editing the library while a game closes.
+- Switched Windows URL and Steam launching to `ShellExecuteW` without console window flashes, with URL scheme validation and proper query encoding.
+- Detected Steam's install folder from the Windows registry and ignored sleep gaps and sessions under 10 seconds in playtime tracking.
+- Ignored outdated VNDB search responses, blocked duplicate route names, and fixed the cancel button in description and notes editors.
+- Fixed topbar layout on smaller windows, checkbox click flashes, and primary button hover states.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added

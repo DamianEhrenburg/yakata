@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/DamianEhrenburg/yakata/releases/latest">
-    <img src="https://img.shields.io/badge/release-v0.3.0-b91c1c?style=flat-square" alt="Latest release">
+    <img src="https://img.shields.io/badge/release-v0.3.1-9b1b30?style=flat-square" alt="Latest release">
   </a>
   <a href="https://github.com/DamianEhrenburg/yakata/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-3f3f46?style=flat-square" alt="License">
@@ -47,7 +47,8 @@ Yakata is a desktop visual novel launcher and tracker for Windows. It catalogs y
 Get the installer or portable archive from [Releases](https://github.com/DamianEhrenburg/yakata/releases/latest):
 
 - `Yakata-Setup.exe` - Windows Installer (NSIS)
-- `Yakata-Portable.zip` - Standalone portable build
+- `Yakata-Portable.zip` - Standalone portable build (stores data in a local `data/` folder via `portable.txt`)
+- `SHA256SUMS.txt` - SHA-256 checksums for release files
 
 ## Building from Source
 

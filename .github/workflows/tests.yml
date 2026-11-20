@@ -18,9 +18,14 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
       - name: Run unit tests
         run: cargo test
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets -- -D warnings

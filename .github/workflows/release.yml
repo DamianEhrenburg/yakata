@@ -19,12 +19,17 @@ jobs:
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
 
       - name: Run unit tests
         run: cargo test
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Install Dioxus CLI
         run: cargo install --locked dioxus-cli
@@ -40,19 +45,36 @@ jobs:
       - name: Prepare Windows artifacts
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path staging -Force
+          New-Item -ItemType Directory -Path staging -Force | Out-Null
           $setup = Get-ChildItem -Path target/dx -Filter "*setup.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
           if (-not $setup) {
             $setup = Get-ChildItem -Path target/dx -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*nsis*" } | Select-Object -First 1
           }
-          if ($setup) {
-            Copy-Item $setup.FullName -Destination "staging/Yakata-Setup.exe"
+          if (-not $setup) {
+            Write-Error "NSIS setup executable was not found in target/dx"
+            exit 1
           }
+          Copy-Item $setup.FullName -Destination "staging/Yakata-Setup.exe"
+
           $appExe = Get-ChildItem -Path target/dx -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*release*windows*app*" } | Select-Object -First 1
-          if ($appExe) {
-            $appDir = $appExe.DirectoryName
-            Compress-Archive -Path "$appDir/*" -DestinationPath "staging/Yakata-Portable.zip" -Force
+          if (-not $appExe) {
+            Write-Error "Release application executable was not found in target/dx"
+            exit 1
           }
+
+          $appDir = $appExe.DirectoryName
+          New-Item -ItemType Directory -Path portable_tmp -Force | Out-Null
+          Copy-Item "$appDir/*" -Destination "portable_tmp" -Recurse
+          New-Item -ItemType File -Path "portable_tmp/portable.txt" -Force | Out-Null
+          Compress-Archive -Path "portable_tmp/*" -DestinationPath "staging/Yakata-Portable.zip" -Force
+          Remove-Item -Path "portable_tmp" -Recurse -Force
+
+          $checksums = @()
+          foreach ($file in @("Yakata-Setup.exe", "Yakata-Portable.zip")) {
+            $hash = (Get-FileHash -Path "staging/$file" -Algorithm SHA256).Hash.ToLowerInvariant()
+            $checksums += "$hash  $file"
+          }
+          Set-Content -Path "staging/SHA256SUMS.txt" -Value $checksums -Encoding utf8NoBOM
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
