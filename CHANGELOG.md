@@ -2,6 +2,12 @@
 
 All notable changes to Yakata are documented here.
 
+## [0.3.2] - 2026-11-20
+
+### Fixed
+- Switched update checks from the GitHub REST API to the releases redirect to avoid rate limits on VPNs and shared IPs.
+- Removed rounded corners from the sidebar update button to match the other sidebar items.
+
 ## [0.3.1] - 2026-11-20
 
 ### Added

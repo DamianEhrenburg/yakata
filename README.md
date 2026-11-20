@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/DamianEhrenburg/yakata/releases/latest">
-    <img src="https://img.shields.io/badge/release-v0.3.1-9b1b30?style=flat-square" alt="Latest release">
+    <img src="https://img.shields.io/badge/release-v0.3.2-9b1b30?style=flat-square" alt="Latest release">
   </a>
   <a href="https://github.com/DamianEhrenburg/yakata/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-3f3f46?style=flat-square" alt="License">
