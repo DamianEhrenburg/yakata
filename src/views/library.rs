@@ -83,7 +83,7 @@ pub fn LibraryView(
                                         }
                                     }
                                     div { class: "vn-cover-frame",
-                                        VnCover { vn: vn.clone(), blur: blur_nsfw && is_vn_nsfw(&vn) }
+                                        VnCover { vn: vn.clone(), blur: blur_nsfw && vn.effective_nsfw() }
                                         if let Some(rating) = vn.rating {
                                             span { class: "vn-rating-badge", "★ {rating}" }
                                         }
@@ -129,23 +129,7 @@ fn VnCover(vn: VisualNovel, blur: bool) -> Element {
 }
 
 pub fn is_vn_nsfw(vn: &VisualNovel) -> bool {
-    if vn.is_nsfw {
-        return true;
-    }
-    let has_nsfw_tag = |s: &str| {
-        let lower = s.trim().to_lowercase();
-        lower == "18+"
-            || lower == "nsfw"
-            || lower == "eroge"
-            || lower == "nukige"
-            || lower == "hentai"
-            || lower == "adult"
-    };
-    if vn.tags.iter().any(|t| has_nsfw_tag(t)) {
-        return true;
-    }
-    let lower_title = vn.title.to_lowercase();
-    lower_title.contains("18+") || lower_title.contains("nsfw")
+    vn.effective_nsfw()
 }
 
 pub fn cover_source(vn: VisualNovel) -> Option<String> {

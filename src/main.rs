@@ -1459,12 +1459,18 @@ fn App() -> Element {
                                                     );
                                                 return;
                                             };
+                                            let old_cover_path = vn.cover_path.clone();
                                             let mut vns_for_cover = vns;
                                             let mut notification_for_cover = notification;
                                             spawn(async move {
                                                 match cache_cover_image(id, cover_url).await {
                                                     Ok(cover_path) => {
                                                         invalidate_cover_cache(&cover_path);
+                                                        if let Some(old_path) = old_cover_path.as_deref()
+                                                            && old_path != cover_path
+                                                        {
+                                                            invalidate_cover_cache(old_path);
+                                                        }
                                                         for vn in vns_for_cover.write().iter_mut() {
                                                             if vn.id == id {
                                                                 vn.cover_path = Some(cover_path.clone());

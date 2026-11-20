@@ -46,10 +46,11 @@ pub fn AddVnForm(
     let mut vndb_query = use_signal(String::new);
     let mut vndb_sort = use_signal(|| VndbSortOrder::SearchRank);
     let mut sort_reverse = use_signal(|| false);
-    let mut search_results: Signal<Vec<VndbSearchResult>> = use_signal(Vec::new);
+    let search_results: Signal<Vec<VndbSearchResult>> = use_signal(Vec::new);
     let mut search_message = use_signal(String::new);
     let mut title_has_error = use_signal(|| false);
     let mut loaded_result_id = use_signal(|| None::<String>);
+    let search_request_id = use_signal(|| 0u64);
     let message_text = search_message.read().clone();
     let results_to_show = search_results.read().clone();
 
@@ -249,21 +250,17 @@ pub fn AddVnForm(
                                             title.set(inferred.clone());
                                             vndb_query.set(inferred.clone());
                                             title_has_error.set(false);
-                                            loaded_result_id.set(None);
-                                            search_message.set("Searching VNDB...".to_string());
                                             let current_sort = *vndb_sort.read();
                                             let current_rev = *sort_reverse.read();
-                                            spawn(async move {
-                                                match search_vns(inferred, current_sort, current_rev).await {
-                                                    Ok(results) => {
-                                                        search_message.set(format_results_count(results.len()));
-                                                        search_results.set(results);
-                                                    }
-                                                    Err(error) => {
-                                                        search_message.set(format!("VNDB search failed: {error}"));
-                                                    }
-                                                }
-                                            });
+                                            execute_vndb_search(
+                                                inferred,
+                                                current_sort,
+                                                current_rev,
+                                                search_request_id,
+                                                search_message,
+                                                search_results,
+                                                loaded_result_id,
+                                            );
                                         }
                                     }
                                 },
@@ -401,26 +398,18 @@ pub fn AddVnForm(
                             oninput: move |e| vndb_query.set(e.value()),
                             onkeydown: move |e| {
                                 if e.key().to_string() == "Enter" {
-                                    let query = vndb_query.read().trim().to_string();
-                                    if query.is_empty() {
-                                        search_message.set("Enter a title or VNDB ID to search".to_string());
-                                        return;
-                                    }
-                                    loaded_result_id.set(None);
-                                    search_message.set("Searching VNDB...".to_string());
+                                    let query = vndb_query.read().clone();
                                     let sort = *vndb_sort.read();
                                     let rev = *sort_reverse.read();
-                                    spawn(async move {
-                                        match search_vns(query, sort, rev).await {
-                                            Ok(results) => {
-                                                search_message.set(format_results_count(results.len()));
-                                                search_results.set(results);
-                                            }
-                                            Err(error) => {
-                                                search_message.set(format!("VNDB search failed: {error}"));
-                                            }
-                                        }
-                                    });
+                                    execute_vndb_search(
+                                        query,
+                                        sort,
+                                        rev,
+                                        search_request_id,
+                                        search_message,
+                                        search_results,
+                                        loaded_result_id,
+                                    );
                                 }
                             },
                         }
@@ -449,21 +438,17 @@ pub fn AddVnForm(
                                 };
                                 vndb_sort.set(new_sort);
                                 let rev = *sort_reverse.read();
-                                let query = vndb_query.read().trim().to_string();
-                                if !query.is_empty() {
-                                    loaded_result_id.set(None);
-                                    search_message.set("Searching VNDB...".to_string());
-                                    spawn(async move {
-                                        match search_vns(query, new_sort, rev).await {
-                                            Ok(results) => {
-                                                search_message.set(format_results_count(results.len()));
-                                                search_results.set(results);
-                                            }
-                                            Err(error) => {
-                                                search_message.set(format!("VNDB search failed: {error}"));
-                                            }
-                                        }
-                                    });
+                                let query = vndb_query.read().clone();
+                                if !query.trim().is_empty() {
+                                    execute_vndb_search(
+                                        query,
+                                        new_sort,
+                                        rev,
+                                        search_request_id,
+                                        search_message,
+                                        search_results,
+                                        loaded_result_id,
+                                    );
                                 }
                             },
                         }
@@ -474,22 +459,18 @@ pub fn AddVnForm(
                             onclick: move |_| {
                                 let new_rev = !*sort_reverse.read();
                                 sort_reverse.set(new_rev);
-                                let query = vndb_query.read().trim().to_string();
-                                if !query.is_empty() {
-                                    loaded_result_id.set(None);
-                                    search_message.set("Searching VNDB...".to_string());
+                                let query = vndb_query.read().clone();
+                                if !query.trim().is_empty() {
                                     let sort = *vndb_sort.read();
-                                    spawn(async move {
-                                        match search_vns(query, sort, new_rev).await {
-                                            Ok(results) => {
-                                                search_message.set(format_results_count(results.len()));
-                                                search_results.set(results);
-                                            }
-                                            Err(error) => {
-                                                search_message.set(format!("VNDB search failed: {error}"));
-                                            }
-                                        }
-                                    });
+                                    execute_vndb_search(
+                                        query,
+                                        sort,
+                                        new_rev,
+                                        search_request_id,
+                                        search_message,
+                                        search_results,
+                                        loaded_result_id,
+                                    );
                                 }
                             },
                             if *sort_reverse.read() { "▼" } else { "▲" }
@@ -498,26 +479,18 @@ pub fn AddVnForm(
                             class: "vndb-search-btn",
                             r#type: "button",
                             onclick: move |_| {
-                                let query = vndb_query.read().trim().to_string();
-                                if query.is_empty() {
-                                    search_message.set("Enter a title or VNDB ID to search".to_string());
-                                    return;
-                                }
-                                loaded_result_id.set(None);
-                                search_message.set("Searching VNDB...".to_string());
+                                let query = vndb_query.read().clone();
                                 let sort = *vndb_sort.read();
                                 let rev = *sort_reverse.read();
-                                spawn(async move {
-                                    match search_vns(query, sort, rev).await {
-                                        Ok(results) => {
-                                            search_message.set(format_results_count(results.len()));
-                                            search_results.set(results);
-                                        }
-                                        Err(error) => {
-                                            search_message.set(format!("VNDB search failed: {error}"));
-                                        }
-                                    }
-                                });
+                                execute_vndb_search(
+                                    query,
+                                    sort,
+                                    rev,
+                                    search_request_id,
+                                    search_message,
+                                    search_results,
+                                    loaded_result_id,
+                                );
                             },
                             "Search"
                         }
@@ -633,11 +606,50 @@ pub fn AddVnForm(
     }
 }
 
+fn execute_vndb_search(
+    query: String,
+    sort: VndbSortOrder,
+    rev: bool,
+    mut search_request_id: Signal<u64>,
+    mut search_message: Signal<String>,
+    mut search_results: Signal<Vec<VndbSearchResult>>,
+    mut loaded_result_id: Signal<Option<String>>,
+) {
+    let trimmed = query.trim().to_string();
+    if trimmed.is_empty() {
+        search_message.set("Enter a title or VNDB ID to search".to_string());
+        return;
+    }
+    loaded_result_id.set(None);
+    search_message.set("Searching VNDB...".to_string());
+    let req_id = {
+        let next = *search_request_id.read() + 1;
+        search_request_id.set(next);
+        next
+    };
+    spawn(async move {
+        let res = search_vns(trimmed, sort, rev).await;
+        if *search_request_id.read() != req_id {
+            return;
+        }
+        match res {
+            Ok(results) => {
+                search_message.set(format_results_count(results.len()));
+                search_results.set(results);
+            }
+            Err(error) => {
+                search_message.set(format!("VNDB search failed: {error}"));
+            }
+        }
+    });
+}
+
 fn infer_title_from_executable_path(path_str: &str) -> Option<String> {
     let path = std::path::Path::new(path_str);
     let mut current = path.parent();
     let skip_names = [
-        "bin", "game", "games", "system", "win32", "win64", "release", "data", "x86", "x64",
+        "bin", "binaries", "game", "games", "system", "win32", "win64", "release", "data", "x86", "x64",
+        "windowsnoeditor", "content", "app", "engine",
     ];
     while let Some(parent) = current {
         let name = parent.file_name()?.to_string_lossy();
@@ -652,13 +664,44 @@ fn infer_title_from_executable_path(path_str: &str) -> Option<String> {
     None
 }
 
+fn is_version_token(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    let trimmed = lower.trim();
+    if let Some(rest) = trimmed.strip_prefix('v')
+        && !rest.is_empty()
+        && rest.contains('.')
+        && rest.starts_with(|c: char| c.is_ascii_digit())
+        && rest.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && rest.chars().any(|c| c.is_ascii_digit())
+    {
+        return true;
+    }
+    if let Some(rest) = trimmed
+        .strip_prefix("ver.")
+        .or_else(|| trimmed.strip_prefix("ver"))
+    {
+        let rest = rest.trim();
+        if !rest.is_empty()
+            && rest.starts_with(|c: char| c.is_ascii_digit())
+            && rest.chars().all(|c| c.is_ascii_digit() || c == '.')
+            && rest.chars().any(|c| c.is_ascii_digit())
+        {
+            return true;
+        }
+    }
+    trimmed.contains('.')
+        && trimmed.starts_with(|c: char| c.is_ascii_digit())
+        && trimmed.chars().all(|c| c.is_ascii_digit() || c == '.')
+        && trimmed.chars().any(|c| c.is_ascii_digit())
+}
+
 fn clean_folder_title(name: &str) -> String {
     let mut result = String::new();
     let mut bracket_depth = 0;
     for ch in name.chars() {
         match ch {
-            '[' | '(' | '{' => bracket_depth += 1,
-            ']' | ')' | '}' => {
+            '[' | '(' | '{' | '【' | '（' => bracket_depth += 1,
+            ']' | ')' | '}' | '】' | '）' => {
                 if bracket_depth > 0 {
                     bracket_depth -= 1;
                 }
@@ -667,8 +710,52 @@ fn clean_folder_title(name: &str) -> String {
             _ => {}
         }
     }
-    let trimmed = result.trim().replace('_', " ");
-    trimmed.split_whitespace().collect::<Vec<_>>().join(" ")
+    let mut s = result.trim().replace('_', " ");
+
+    if !s.contains(' ') && s.contains('.') {
+        let raw_segs: Vec<&str> = s.split('.').collect();
+        let has_abbreviation = raw_segs.windows(2).any(|w| {
+            w[0].len() == 1
+                && w[0].chars().all(|c| c.is_alphabetic())
+                && w[1].len() == 1
+                && w[1].chars().all(|c| c.is_alphabetic())
+        });
+        if !has_abbreviation {
+            let chars: Vec<char> = s.chars().collect();
+            let n = chars.len();
+            let mut new_chars = Vec::with_capacity(n);
+            for i in 0..n {
+                if chars[i] == '.' {
+                    let prev_is_digit = i > 0 && chars[i - 1].is_ascii_digit();
+                    let next_is_digit = i + 1 < n && chars[i + 1].is_ascii_digit();
+                    if prev_is_digit && next_is_digit {
+                        new_chars.push('.');
+                    } else {
+                        new_chars.push(' ');
+                    }
+                } else {
+                    new_chars.push(chars[i]);
+                }
+            }
+            s = new_chars.into_iter().collect();
+        }
+    }
+
+    let mut tokens: Vec<&str> = s.split_whitespace().collect();
+    let mut removed_version = false;
+    while let Some(&last) = tokens.last() {
+        if is_version_token(last) {
+            tokens.pop();
+            removed_version = true;
+        } else {
+            break;
+        }
+    }
+    if removed_version && tokens.last() == Some(&"-") {
+        tokens.pop();
+    }
+
+    tokens.join(" ")
 }
 
 fn parse_tags(text: String) -> Vec<String> {
@@ -710,5 +797,32 @@ mod tests {
     fn test_parse_tags() {
         let tags = parse_tags("Action, Sci-Fi, Mystery, , 18+".to_string());
         assert_eq!(tags, vec!["Action", "Sci-Fi", "Mystery", "18+"]);
+    }
+
+    #[test]
+    fn test_clean_folder_title() {
+        assert_eq!(clean_folder_title("Steins;Gate"), "Steins;Gate");
+        assert_eq!(clean_folder_title("[RJ12345] Mahoyo (v1.0)"), "Mahoyo");
+        assert_eq!(clean_folder_title("【同人】Mahoyo（18禁）"), "Mahoyo");
+        assert_eq!(
+            clean_folder_title("A.Sky.Full.of.Stars.v1.0"),
+            "A Sky Full of Stars"
+        );
+        assert_eq!(clean_folder_title("Danganronpa V3"), "Danganronpa V3");
+        assert_eq!(clean_folder_title("Fate_Stay_Night"), "Fate Stay Night");
+        assert_eq!(clean_folder_title("Fate.Stay.Night"), "Fate Stay Night");
+        assert_eq!(clean_folder_title("Clannad.v1.05"), "Clannad");
+        assert_eq!(clean_folder_title("Q.U.Q"), "Q.U.Q");
+        assert_eq!(clean_folder_title("D.C."), "D.C.");
+        assert_eq!(clean_folder_title("D.C. ~Da Capo~"), "D.C. ~Da Capo~");
+        assert_eq!(
+            clean_folder_title("Muv-Luv.Alternative.v1.2"),
+            "Muv-Luv Alternative"
+        );
+        assert_eq!(clean_folder_title("Tsukihime v1.0"), "Tsukihime");
+        assert_eq!(
+            clean_folder_title("Fate Stay Night - v1.0"),
+            "Fate Stay Night"
+        );
     }
 }

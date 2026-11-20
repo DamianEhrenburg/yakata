@@ -117,6 +117,28 @@ pub struct VisualNovel {
     pub is_nsfw: bool,
 }
 
+impl VisualNovel {
+    pub fn effective_nsfw(&self) -> bool {
+        if self.is_nsfw {
+            return true;
+        }
+        let has_nsfw_tag = |s: &str| {
+            let lower = s.trim();
+            lower.eq_ignore_ascii_case("18+")
+                || lower.eq_ignore_ascii_case("nsfw")
+                || lower.eq_ignore_ascii_case("eroge")
+                || lower.eq_ignore_ascii_case("nukige")
+                || lower.eq_ignore_ascii_case("hentai")
+                || lower.eq_ignore_ascii_case("adult")
+        };
+        if self.tags.iter().any(|t| has_nsfw_tag(t)) {
+            return true;
+        }
+        let lower_title = self.title.to_lowercase();
+        lower_title.contains("18+") || lower_title.contains("nsfw")
+    }
+}
+
 impl Default for VisualNovel {
     fn default() -> Self {
         Self {
@@ -323,5 +345,32 @@ mod tests {
         let json = serde_json::to_string(&status).expect("Serialization failed");
         let parsed: NovelStatus = serde_json::from_str(&json).expect("Deserialization failed");
         assert_eq!(status, parsed);
+    }
+
+    #[test]
+    fn test_effective_nsfw() {
+        let clean = VisualNovel {
+            title: "Clannad".to_string(),
+            ..Default::default()
+        };
+        assert!(!clean.effective_nsfw());
+
+        let flag_nsfw = VisualNovel {
+            is_nsfw: true,
+            ..Default::default()
+        };
+        assert!(flag_nsfw.effective_nsfw());
+
+        let tag_nsfw = VisualNovel {
+            tags: vec!["Eroge".to_string()],
+            ..Default::default()
+        };
+        assert!(tag_nsfw.effective_nsfw());
+
+        let title_nsfw = VisualNovel {
+            title: "Title 18+".to_string(),
+            ..Default::default()
+        };
+        assert!(title_nsfw.effective_nsfw());
     }
 }

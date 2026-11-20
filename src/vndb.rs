@@ -1,4 +1,29 @@
 use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
+use std::time::Duration;
+
+pub fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .user_agent(concat!("yakata/", env!("CARGO_PKG_VERSION")))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+pub fn parse_vndb_id(query: &str) -> Option<String> {
+    let trimmed = query.trim();
+    if (trimmed.starts_with('v') || trimmed.starts_with('V'))
+        && trimmed.len() > 1
+        && trimmed[1..].chars().all(|c| c.is_ascii_digit())
+    {
+        Some(trimmed.to_ascii_lowercase())
+    } else {
+        None
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct VndbTag {
@@ -59,8 +84,10 @@ struct VndbSearchResponse {
 struct VndbSearchRequest {
     pub filters: serde_json::Value,
     pub fields: String,
-    pub sort: String,
-    pub reverse: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reverse: Option<bool>,
     pub results: u32,
 }
 
@@ -69,12 +96,22 @@ pub async fn search_vns(
     sort: VndbSortOrder,
     reverse: bool,
 ) -> Result<Vec<VndbSearchResult>, reqwest::Error> {
-    let client = reqwest::Client::new();
+    let client = http_client();
+    let (filters, sort_opt, reverse_opt) = if let Some(id) = parse_vndb_id(&query) {
+        (serde_json::json!(["id", "=", id]), None, None)
+    } else {
+        (
+            serde_json::json!(["search", "=", query.trim()]),
+            Some(sort.as_api_str().to_string()),
+            Some(reverse),
+        )
+    };
+
     let request_body = VndbSearchRequest {
-        filters: serde_json::json!(["search", "=", query]),
+        filters,
         fields: "id, title, image.url, image.sexual, description, released, rating, tags.name, tags.rating, tags.spoiler, tags.category".to_string(),
-        sort: sort.as_api_str().to_string(),
-        reverse,
+        sort: sort_opt,
+        reverse: reverse_opt,
         results: 20,
     };
     let response = client
@@ -253,5 +290,15 @@ mod tests {
         }];
         let filtered = filter_vndb_tags(&tags, true);
         assert_eq!(filtered, vec!["Horror", "18+"]);
+    }
+
+    #[test]
+    fn test_parse_vndb_id() {
+        assert_eq!(parse_vndb_id("v17"), Some("v17".to_string()));
+        assert_eq!(parse_vndb_id("V17"), Some("v17".to_string()));
+        assert_eq!(parse_vndb_id("  v92  "), Some("v92".to_string()));
+        assert_eq!(parse_vndb_id("v"), None);
+        assert_eq!(parse_vndb_id("v17a"), None);
+        assert_eq!(parse_vndb_id("Steins;Gate"), None);
     }
 }

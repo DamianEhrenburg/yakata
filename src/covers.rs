@@ -15,7 +15,10 @@ pub async fn cache_cover_image(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let cache_dir = cover_cache_dir()?;
     let cover_file = cache_dir.join(format!("{vn_id}.jpg"));
-    let image_bytes = reqwest::get(cover_url)
+    let client = crate::vndb::http_client();
+    let image_bytes = client
+        .get(cover_url)
+        .send()
         .await?
         .error_for_status()?
         .bytes()
