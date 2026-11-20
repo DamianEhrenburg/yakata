@@ -64,6 +64,7 @@ pub fn LibraryView(
                             };
                             rsx! {
                                 article {
+                                    key: "{vn_id}",
                                     class: "{card_class}",
                                     onclick: move |_| {
                                         on_select.call(vn.id);

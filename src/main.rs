@@ -101,6 +101,19 @@ enum SaveJob {
 }
 
 #[component]
+fn BackgroundStyle(custom_path: Option<String>) -> Element {
+    let bg_style = match custom_path.as_deref().and_then(local_path_to_data_url) {
+        Some(url) => format!("--app-bg-image: url('{url}');"),
+        None => format!("--app-bg-image: url('{BG_IMAGE}');"),
+    };
+    rsx! {
+        style {
+            r#".app-frame {{ {bg_style} }}"#
+        }
+    }
+}
+
+#[component]
 fn App() -> Element {
     let saved_library = match load_library() {
         Ok(library) => library,
@@ -363,24 +376,16 @@ fn App() -> Element {
         }
     });
 
-    let custom_bg_url = settings
-        .read()
-        .custom_background_path
-        .as_ref()
-        .and_then(|p| local_path_to_data_url(p));
-    let bg_style = match custom_bg_url {
-        Some(url) => format!("--app-bg-image: url('{url}');"),
-        None => format!("--app-bg-image: url('{BG_IMAGE}');"),
-    };
-
     let session_tx_for_launch = session_tx.clone();
 
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
+        BackgroundStyle {
+            custom_path: settings.read().custom_background_path.clone(),
+        }
 
         main {
             class: "app-frame",
-            style: "{bg_style}",
 
             ResizeHandle { class: "resize-north", direction: ResizeDirection::North }
             ResizeHandle {
@@ -640,7 +645,7 @@ fn App() -> Element {
                                 }
                             }
 
-                            div { class: "topbar-select-field",
+                            div { class: "topbar-select-field tag-field",
                                 span { class: "topbar-select-label", "Tag" }
 
                                 {
@@ -847,9 +852,13 @@ fn App() -> Element {
                                             );
                                         },
 
-                                        on_route_add: move |(id, route_name)| {
+                                        on_route_add: move |(id, route_name): (u64, String)| {
+                                            let trimmed_name = route_name.trim().to_string();
+                                            if trimmed_name.is_empty() {
+                                                return;
+                                            }
                                             let new_route = StoryRoute {
-                                                name: route_name,
+                                                name: trimmed_name.clone(),
                                                 completed: false,
                                                 notes: None,
                                             };
@@ -858,7 +867,9 @@ fn App() -> Element {
                                                 &mut vns,
                                                 id,
                                                 move |vn| {
-                                                    vn.routes.push(new_route);
+                                                    if !vn.routes.iter().any(|r| r.name.trim().eq_ignore_ascii_case(&trimmed_name)) {
+                                                        vn.routes.push(new_route);
+                                                    }
                                                 },
                                                 "Could not save route".to_string(),
                                             );

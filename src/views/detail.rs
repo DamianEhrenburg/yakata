@@ -52,8 +52,8 @@ pub fn DetailView(
 ) -> Element {
     let mut new_route_name = use_signal(String::new);
     let typed_route_name = new_route_name.read().clone();
-    let mut route_name_has_error = use_signal(|| false);
-    let route_name_error_is_visible = *route_name_has_error.read();
+    let mut route_error_message = use_signal(|| None::<String>);
+    let route_error_text = route_error_message.read().clone();
     let executable_path_text = vn.executable_path.clone().unwrap_or_default();
     let mut executable_path_draft = use_signal(|| executable_path_text.clone());
     let wine_prefix_text = vn.wine_prefix.clone().unwrap_or_default();
@@ -92,8 +92,10 @@ pub fn DetailView(
     let notes_value = notes_draft.read().clone();
     let saved_notes = vn.notes.clone();
     let mut notes_is_editing = use_signal(|| false);
+    let mut notes_cancelled = use_signal(|| false);
     let mut description_draft = use_signal(|| vn.description.clone().unwrap_or_default());
     let mut description_is_editing = use_signal(|| false);
+    let mut description_cancelled = use_signal(|| false);
     let saved_description = vn.description.clone().unwrap_or_default();
     let description_value = description_draft.read().clone();
     let description_parts = parse_description(saved_description.clone());
@@ -116,6 +118,12 @@ pub fn DetailView(
         .map(|session| session.duration_seconds)
         .sum();
     let total_playtime_text = format_playtime(total_playtime_seconds);
+    let saved_desc_for_mouse = saved_description.clone();
+    let saved_desc_for_click = saved_description.clone();
+    let saved_notes_for_mouse = saved_notes.clone();
+    let saved_notes_for_click = saved_notes.clone();
+    let existing_routes_for_key = vn.routes.clone();
+    let existing_routes_for_click = vn.routes.clone();
     rsx! {
         section { class: "detail-panel",
 
@@ -357,10 +365,22 @@ pub fn DetailView(
                         button {
                             class: "section-action-btn",
                             title: if *description_is_editing.read() { "Close editor" } else { "Edit description" },
+                            onmousedown: move |event: MouseEvent| {
+                                if *description_is_editing.read() {
+                                    event.prevent_default();
+                                    description_cancelled.set(true);
+                                    description_draft.set(saved_desc_for_mouse.clone());
+                                    description_is_editing.set(false);
+                                }
+                            },
                             onclick: move |_| {
+                                if *description_cancelled.read() {
+                                    description_cancelled.set(false);
+                                    return;
+                                }
                                 let next_value = !*description_is_editing.read();
                                 if next_value {
-                                    description_draft.set(vn.description.clone().unwrap_or_default());
+                                    description_draft.set(saved_desc_for_click.clone());
                                 }
                                 description_is_editing.set(next_value);
                             },
@@ -376,8 +396,10 @@ pub fn DetailView(
                                     description_draft.set(event.value());
                                 },
                                 onblur: move |_| {
-                                    on_description_change.call((vn.id, description_draft.read().clone()));
-                                    description_is_editing.set(false);
+                                    if *description_is_editing.read() && !*description_cancelled.read() {
+                                        on_description_change.call((vn.id, description_draft.read().clone()));
+                                        description_is_editing.set(false);
+                                    }
                                 },
                             }
                         } else if saved_description.is_empty() {
@@ -396,10 +418,22 @@ pub fn DetailView(
                         button {
                             class: "section-action-btn",
                             title: if *notes_is_editing.read() { "Close editor" } else { "Edit notes" },
+                            onmousedown: move |event: MouseEvent| {
+                                if *notes_is_editing.read() {
+                                    event.prevent_default();
+                                    notes_cancelled.set(true);
+                                    notes_draft.set(saved_notes_for_mouse.clone());
+                                    notes_is_editing.set(false);
+                                }
+                            },
                             onclick: move |_| {
+                                if *notes_cancelled.read() {
+                                    notes_cancelled.set(false);
+                                    return;
+                                }
                                 let next_value = !*notes_is_editing.read();
                                 if next_value {
-                                    notes_draft.set(vn.notes.clone());
+                                    notes_draft.set(saved_notes_for_click.clone());
                                 }
                                 notes_is_editing.set(next_value);
                             },
@@ -416,8 +450,10 @@ pub fn DetailView(
                                     notes_draft.set(event.value());
                                 },
                                 onblur: move |_| {
-                                    on_notes_change.call((vn.id, notes_draft.read().clone()));
-                                    notes_is_editing.set(false);
+                                    if *notes_is_editing.read() && !*notes_cancelled.read() {
+                                        on_notes_change.call((vn.id, notes_draft.read().clone()));
+                                        notes_is_editing.set(false);
+                                    }
                                 },
                             }
                         } else if saved_notes.is_empty() {
@@ -840,6 +876,7 @@ pub fn DetailView(
                                     input {
                                         r#type: "number",
                                         min: "0",
+                                        max: "9999",
                                         value: "{add_session_hours}",
                                         oninput: move |e| add_session_hours.set(e.value()),
                                     }
@@ -868,9 +905,9 @@ pub fn DetailView(
                                 button {
                                     class: "add-session-save-btn",
                                     onclick: move |_| {
-                                        let h: u64 = add_session_hours.read().parse().unwrap_or(0);
-                                        let m: u64 = add_session_minutes.read().parse().unwrap_or(0);
-                                        let total_sec = h * 3600 + m * 60;
+                                        let h: u64 = add_session_hours.read().parse().unwrap_or(0).min(9999);
+                                        let m: u64 = add_session_minutes.read().parse().unwrap_or(0).min(59);
+                                        let total_sec = h.saturating_mul(3600).saturating_add(m.saturating_mul(60));
                                         if total_sec > 0 {
                                             let note = add_session_note.read().trim().to_string();
                                             let note_opt = if note.is_empty() { None } else { Some(note) };
@@ -938,13 +975,12 @@ pub fn DetailView(
                             }
                             div { class: "route-add-row",
                                 input {
-                                    class: if route_name_error_is_visible { "route-add-input field-invalid" } else { "route-add-input" },
+                                    class: if route_error_text.is_some() { "route-add-input field-invalid" } else { "route-add-input" },
                                     placeholder: "New route name...",
                                     value: "{typed_route_name}",
                                     oninput: move |event| {
-                                        let value = event.value();
-                                        if !value.trim().is_empty() {
-                                            route_name_has_error.set(false);
+                                        if route_error_message.read().is_some() {
+                                            route_error_message.set(None);
                                         }
                                         new_route_name.set(event.value());
                                     },
@@ -952,9 +988,14 @@ pub fn DetailView(
                                         if event.key() == Key::Enter {
                                             let route_name = new_route_name.read().trim().to_string();
                                             if route_name.is_empty() {
-                                                route_name_has_error.set(true);
+                                                route_error_message.set(Some("Route name is required.".to_string()));
                                                 return;
                                             }
+                                            if existing_routes_for_key.iter().any(|r| r.name.trim().eq_ignore_ascii_case(&route_name)) {
+                                                route_error_message.set(Some("A route with this name already exists.".to_string()));
+                                                return;
+                                            }
+                                            route_error_message.set(None);
                                             on_route_add.call((vn.id, route_name));
                                             new_route_name.set(String::new());
                                         }
@@ -966,17 +1007,22 @@ pub fn DetailView(
                                     onclick: move |_| {
                                         let route_name = new_route_name.read().trim().to_string();
                                         if route_name.is_empty() {
-                                            route_name_has_error.set(true);
+                                            route_error_message.set(Some("Route name is required.".to_string()));
                                             return;
                                         }
+                                        if existing_routes_for_click.iter().any(|r| r.name.trim().eq_ignore_ascii_case(&route_name)) {
+                                            route_error_message.set(Some("A route with this name already exists.".to_string()));
+                                            return;
+                                        }
+                                        route_error_message.set(None);
                                         on_route_add.call((vn.id, route_name));
                                         new_route_name.set(String::new());
                                     },
                                     "+"
                                 }
                             }
-                            if route_name_error_is_visible {
-                                p { class: "field-error", "Route name is required." }
+                            if let Some(ref err_msg) = route_error_text {
+                                p { class: "field-error", "{err_msg}" }
                             }
                             if vn.routes.is_empty() {
                                 p { class: "stat-label", "No routes yet." }
@@ -987,6 +1033,7 @@ pub fn DetailView(
                                             let is_active = vn.active_route.as_deref() == Some(route.name.as_str());
                                             rsx! {
                                                 RouteItem {
+                                                    key: "{route.name}",
                                                     vn_id: vn.id,
                                                     route,
                                                     is_active,

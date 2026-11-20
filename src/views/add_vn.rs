@@ -194,18 +194,35 @@ pub fn AddVnForm(
                     }
                     div { class: "add-vn-field-group",
                         span { class: "add-vn-field-label", "Cover path" }
-                        input {
-                            value: cover_path_text.clone().unwrap_or_default(),
-                            placeholder: "Optional: local image path",
-                            oninput: move |event| {
-                                let value = event.value();
-                                if value.trim().is_empty() {
-                                    cover_path.set(None);
-                                } else {
-                                    cover_path.set(Some(value));
-                                    cover_url.set(None);
-                                }
-                            },
+                        div { class: "add-vn-input-browse-row",
+                            input {
+                                value: cover_path_text.clone().unwrap_or_default(),
+                                placeholder: "Optional: local image path",
+                                oninput: move |event| {
+                                    let value = event.value();
+                                    if value.trim().is_empty() {
+                                        cover_path.set(None);
+                                    } else {
+                                        cover_path.set(Some(value));
+                                        cover_url.set(None);
+                                    }
+                                },
+                            }
+                            button {
+                                class: "add-vn-browse-btn",
+                                r#type: "button",
+                                onclick: move |_| {
+                                    let picked_file = rfd::FileDialog::new()
+                                        .add_filter("Image", &["png", "jpg", "jpeg", "webp"])
+                                        .pick_file();
+                                    if let Some(path) = picked_file {
+                                        let path_str = path.to_string_lossy().to_string();
+                                        cover_path.set(Some(path_str));
+                                        cover_url.set(None);
+                                    }
+                                },
+                                "Browse"
+                            }
                         }
                     }
                     div { class: "add-vn-field-group",
