@@ -379,6 +379,7 @@ img {
   width: 100%;
   min-height: 0;
   border: 0;
+  border-radius: 0;
   border-left: 3px solid var(--accent);
   border-bottom: 1px solid var(--line);
   background: linear-gradient(

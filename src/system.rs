@@ -135,30 +135,46 @@ pub fn open_url(url: &str) -> Result<(), io::Error> {
     }
 }
 
-#[derive(serde::Deserialize)]
-struct GithubRelease {
-    tag_name: String,
+pub fn extract_tag_from_redirect_location(location: &str) -> Option<&str> {
+    let (_before, tag_part) = location.split_once("/releases/tag/")?;
+    let tag = tag_part
+        .split('?')
+        .next()?
+        .split('#')
+        .next()?
+        .trim_end_matches('/')
+        .trim();
+    if tag.is_empty() {
+        None
+    } else {
+        Some(tag)
+    }
 }
 
 pub async fn check_latest_github_release() -> Option<String> {
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .user_agent("yakata-app")
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(10))
+        .user_agent(concat!("yakata/", env!("CARGO_PKG_VERSION")))
         .build()
         .ok()?;
 
-    let response = client
-        .get("https://api.github.com/repos/DamianEhrenburg/yakata/releases/latest")
+    let response = match client
+        .head("https://github.com/DamianEhrenburg/yakata/releases/latest")
         .send()
         .await
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json::<GithubRelease>()
-        .await
-        .ok()?;
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            eprintln!("Failed to check for updates: {err}");
+            return None;
+        }
+    };
 
-    let tag = response.tag_name.trim();
+    let location_header = response.headers().get(reqwest::header::LOCATION)?;
+    let location = location_header.to_str().ok()?;
+    let tag = extract_tag_from_redirect_location(location)?;
+
     let remote_ver_str = tag
         .strip_prefix('v')
         .or_else(|| tag.strip_prefix('V'))
@@ -211,5 +227,28 @@ mod tests {
             "Fate%2Fstay+night+%26+hollow"
         );
         assert_eq!(percent_encode("桜"), "%E6%A1%9C");
+    }
+
+    #[test]
+    fn test_extract_tag_from_redirect_location() {
+        assert_eq!(
+            extract_tag_from_redirect_location(
+                "https://github.com/DamianEhrenburg/yakata/releases/tag/v0.3.2"
+            ),
+            Some("v0.3.2")
+        );
+        assert_eq!(
+            extract_tag_from_redirect_location(
+                "/DamianEhrenburg/yakata/releases/tag/v0.3.2?foo=1"
+            ),
+            Some("v0.3.2")
+        );
+        assert_eq!(
+            extract_tag_from_redirect_location(
+                "https://github.com/DamianEhrenburg/yakata/releases"
+            ),
+            None
+        );
+        assert_eq!(extract_tag_from_redirect_location(""), None);
     }
 }
