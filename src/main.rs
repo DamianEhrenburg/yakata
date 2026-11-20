@@ -15,7 +15,7 @@ use covers::cache_cover_image;
 use discord_presence::DiscordPresence;
 #[cfg(target_os = "linux")]
 use launcher::install_steam_tool_wrapper;
-use launcher::{ToolLaunch, launch_executable, launch_steam_tool, parse_launch_environment};
+use launcher::{LaunchOptions, ToolLaunch, launch_executable, launch_steam_tool, parse_launch_environment};
 
 use logs::{launch_logs_dir, new_launch_log_path, update_latest_launch_log};
 use models::{
@@ -39,7 +39,6 @@ use dioxus::desktop::{
 };
 use dioxus::prelude::*;
 use std::thread;
-use std::time::Instant;
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 const BG_IMAGE: Asset = asset!("/assets/yakata_bg.jpg");
@@ -299,37 +298,37 @@ fn App() -> Element {
     match selected_sort_mode {
         LibrarySortMode::Added => {
             if is_sort_descending {
-                filtered_vns.sort_by(|a, b| b.id.cmp(&a.id));
+                filtered_vns.sort_by_key(|a| std::cmp::Reverse(a.id));
             } else {
-                filtered_vns.sort_by(|a, b| a.id.cmp(&b.id));
+                filtered_vns.sort_by_key(|a| a.id);
             }
         }
         LibrarySortMode::RatingDesc => {
             if is_sort_descending {
-                filtered_vns.sort_by(|a, b| b.rating.unwrap_or(0).cmp(&a.rating.unwrap_or(0)));
+                filtered_vns.sort_by_key(|a| std::cmp::Reverse(a.rating.unwrap_or(0)));
             } else {
-                filtered_vns.sort_by(|a, b| a.rating.unwrap_or(0).cmp(&b.rating.unwrap_or(0)));
+                filtered_vns.sort_by_key(|a| a.rating.unwrap_or(0));
             }
         }
         LibrarySortMode::TitleAsc | LibrarySortMode::TitleDesc => {
             if is_sort_descending {
-                filtered_vns.sort_by(|a, b| b.title.to_lowercase().cmp(&a.title.to_lowercase()));
+                filtered_vns.sort_by_cached_key(|a| std::cmp::Reverse(a.title.to_lowercase()));
             } else {
-                filtered_vns.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+                filtered_vns.sort_by_cached_key(|a| a.title.to_lowercase());
             }
         }
         LibrarySortMode::LastPlayed => {
             if is_sort_descending {
-                filtered_vns.sort_by(|a, b| latest_played_at(b).cmp(&latest_played_at(a)));
+                filtered_vns.sort_by_cached_key(|a| std::cmp::Reverse(latest_played_at(a)));
             } else {
-                filtered_vns.sort_by(|a, b| latest_played_at(a).cmp(&latest_played_at(b)));
+                filtered_vns.sort_by_cached_key(latest_played_at);
             }
         }
         LibrarySortMode::MostPlaytime => {
             if is_sort_descending {
-                filtered_vns.sort_by(|a, b| total_playtime_seconds(b).cmp(&total_playtime_seconds(a)));
+                filtered_vns.sort_by_cached_key(|a| std::cmp::Reverse(total_playtime_seconds(a)));
             } else {
-                filtered_vns.sort_by(|a, b| total_playtime_seconds(a).cmp(&total_playtime_seconds(b)));
+                filtered_vns.sort_by_cached_key(total_playtime_seconds);
             }
         }
     }
@@ -697,7 +696,7 @@ fn App() -> Element {
 
                                                 on_add: move |new_vn: NewVN| {
                                                     let is_duplicate_title = vns.read().iter().any(|vn| vn.title.trim().eq_ignore_ascii_case(new_vn.title.trim()));
-                                                    let is_duplicate_id = new_vn.vndb_id.as_ref().map_or(false, |id| {
+                                                    let is_duplicate_id = new_vn.vndb_id.as_ref().is_some_and(|id| {
                                                         vns.read().iter().any(|vn| vn.vndb_id.as_deref() == Some(id.as_str()))
                                                     });
                                                     if is_duplicate_title || is_duplicate_id {
@@ -998,81 +997,83 @@ fn App() -> Element {
 
                                             let executable_path = vn.executable_path.clone().unwrap_or_default();
                                             let is_steam = vn.launch_mode == LaunchMode::Steam;
-
-                                            match launch_executable(
+                                            let options = LaunchOptions {
                                                 executable_path,
-                                                vn.launch_mode,
-                                                vn.steam_app_id,
-                                                vn.wine_binary,
-                                                vn.wine_prefix,
-                                                vn.wine_locale,
-                                                vn.proton_path,
-                                                vn.umu_game_id,
-                                                vn.launch_arguments,
+                                                launch_mode: vn.launch_mode,
+                                                steam_app_id: vn.steam_app_id,
+                                                wine_binary: vn.wine_binary,
+                                                wine_prefix: vn.wine_prefix,
+                                                wine_locale: vn.wine_locale,
+                                                proton_path: vn.proton_path,
+                                                umu_game_id: vn.umu_game_id,
+                                                launch_arguments: vn.launch_arguments,
                                                 launch_environment,
-                                                launch_log_path.clone(),
-                                                vn.run_with_locale_emulator,
-                                                settings.read().leproc_path.clone(),
-                                            ) {
+                                                launch_log_path: launch_log_path.clone(),
+                                                run_with_locale_emulator: vn.run_with_locale_emulator,
+                                                leproc_path: settings.read().leproc_path.clone(),
+                                            };
+
+                                            match launch_executable(options) {
                                                 Ok(child) => {
                                                     let started_time = Utc::now();
                                                     let started_at = started_time.to_rfc3339();
-                                                    let started_timer = Instant::now();
                                                     let vn_id = presence_vn.id;
                                                     notification.set(Some(AppNotification {
                                                         level: NotificationLevel::Info,
                                                         message: format!("Launched {}.", presence_vn.title),
                                                     }));
-                                                    let discord_presence = if settings
-                                                        .read()
-                                                        .discord_rich_presence_enabled
-                                                    {
-                                                        match DiscordPresence::start_for_vn(
-                                                            &presence_vn,
-                                                            started_time,
-                                                            settings.read().clone(),
-                                                        ) {
-                                                            Ok(presence) => Some(presence),
-                                                            Err(error) => {
-                                                                println!("Could not start Discord Rich Presence: {error}");
-                                                                None
-                                                            }
-                                                        }
-                                                    } else {
-                                                        None
-                                                    };
+                                                    let discord_enabled = settings.read().discord_rich_presence_enabled;
+                                                    let discord_settings = settings.read().clone();
                                                     let thread_session_tx = session_tx_for_launch.clone();
                                                     thread::spawn(move || {
-                                                        let wait_result = game_process::wait_for_game_exit(child, game_folder, is_steam);
-                                                        if let Some(log_path) = launch_log_path {
-                                                            if let Err(error) = update_latest_launch_log(&log_path) {
-                                                                println!("Could not update latest launch log: {error}");
+                                                        let discord_presence = if discord_enabled {
+                                                            match DiscordPresence::start_for_vn(
+                                                                &presence_vn,
+                                                                started_time,
+                                                                discord_settings,
+                                                            ) {
+                                                                Ok(presence) => Some(presence),
+                                                                Err(error) => {
+                                                                    eprintln!("Could not start Discord Rich Presence: {error}");
+                                                                    None
+                                                                }
                                                             }
+                                                        } else {
+                                                            None
+                                                        };
+                                                        let wait_result = game_process::wait_for_game_exit(child, game_folder, is_steam);
+                                                        if let Some(log_path) = launch_log_path
+                                                            && let Err(error) = update_latest_launch_log(&log_path)
+                                                        {
+                                                            eprintln!("Could not update latest launch log: {error}");
                                                         }
                                                         match wait_result {
-                                                            Ok(last_seen_running) => {
-                                                                let duration_seconds = last_seen_running
-                                                                    .duration_since(started_timer)
-                                                                    .as_secs();
-                                                                let play_session = PlaySession {
-                                                                    vn_id,
-                                                                    started_at: started_at.clone(),
-                                                                    duration_seconds,
-                                                                    notes: None,
-                                                                };
-                                                                println!(
-                                                                    "VN {vn_id} closed after {duration_seconds} seconds.",
-                                                                );
-                                                                let _ = thread_session_tx.send((vn_id, play_session));
+                                                            Ok(duration_seconds) => {
+                                                                if duration_seconds >= 10 {
+                                                                    let play_session = PlaySession {
+                                                                        vn_id,
+                                                                        started_at: started_at.clone(),
+                                                                        duration_seconds,
+                                                                        notes: None,
+                                                                    };
+                                                                    println!(
+                                                                        "VN {vn_id} closed after {duration_seconds} seconds.",
+                                                                    );
+                                                                    let _ = thread_session_tx.send((vn_id, play_session));
+                                                                } else {
+                                                                    println!(
+                                                                        "VN {vn_id} session lasted {duration_seconds}s (<10s), skipping save.",
+                                                                    );
+                                                                }
                                                             }
                                                             Err(error) => {
-                                                                println!("Could not monitor VN process: {error}");
+                                                                eprintln!("Could not monitor VN process: {error}");
                                                             }
                                                         }
-                                                        if let Some(presence) = discord_presence {
-                                                            if let Err(error) = presence.clear() {
-                                                                println!("Could not clear Discord Rich Presence: {error}");
-                                                            }
+                                                        if let Some(presence) = discord_presence
+                                                            && let Err(error) = presence.clear()
+                                                        {
+                                                            eprintln!("Could not clear Discord Rich Presence: {error}");
                                                         }
                                                     });
                                                 }
@@ -1167,22 +1168,25 @@ fn App() -> Element {
                                                     launch_log_path,
                                                 )
                                             } else {
-                                                launch_executable(
-                                                    tool_path,
-                                                    vn.launch_mode,
-                                                    vn.steam_app_id,
-                                                    vn.wine_binary,
-                                                    vn.wine_prefix,
-                                                    vn.wine_locale,
-                                                    vn.proton_path,
-                                                    vn.umu_game_id,
-                                                    vn.launch_arguments,
+                                                let options = LaunchOptions {
+                                                    executable_path: tool_path,
+                                                    launch_mode: vn.launch_mode,
+                                                    steam_app_id: vn.steam_app_id,
+                                                    wine_binary: vn.wine_binary,
+                                                    wine_prefix: vn.wine_prefix,
+                                                    wine_locale: vn.wine_locale,
+                                                    proton_path: vn.proton_path,
+                                                    umu_game_id: vn.umu_game_id,
+                                                    launch_arguments: vn.launch_arguments,
                                                     launch_environment,
                                                     launch_log_path,
-                                                    vn.run_with_locale_emulator,
-                                                    settings.read().leproc_path.clone(),
-                                                )
-                                                .map(ToolLaunch::Process)
+                                                    run_with_locale_emulator: vn.run_with_locale_emulator,
+                                                    leproc_path: settings.read().leproc_path.clone(),
+                                                };
+                                                launch_executable(options).map(|child_opt| match child_opt {
+                                                    Some(child) => ToolLaunch::Process(child),
+                                                    None => ToolLaunch::Queued,
+                                                })
                                             };
                                             match launch_result {
                                                 Ok(ToolLaunch::Queued) => {

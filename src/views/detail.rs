@@ -14,21 +14,6 @@ enum DetailTab {
     History,
 }
 
-fn open_url_in_browser(url: &str) {
-    #[cfg(target_os = "windows")]
-    {
-        let _ = std::process::Command::new("rundll32")
-            .args(["url.dll,FileProtocolHandler", url])
-            .spawn();
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("xdg-open")
-            .arg(url)
-            .spawn();
-    }
-}
-
 #[component]
 pub fn DetailView(
     vn: VisualNovel,
@@ -69,10 +54,7 @@ pub fn DetailView(
     let typed_route_name = new_route_name.read().clone();
     let mut route_name_has_error = use_signal(|| false);
     let route_name_error_is_visible = *route_name_has_error.read();
-    let executable_path_text = match vn.executable_path.clone() {
-        Some(path) => path,
-        None => String::new(),
-    };
+    let executable_path_text = vn.executable_path.clone().unwrap_or_default();
     let mut executable_path_draft = use_signal(|| executable_path_text.clone());
     let wine_prefix_text = vn.wine_prefix.clone().unwrap_or_default();
     let wine_locale_text = vn.wine_locale.clone().unwrap_or_default();
@@ -264,14 +246,14 @@ pub fn DetailView(
                         let vndb_url = if let Some(ref vid) = vn.vndb_id {
                             format!("https://vndb.org/{vid}")
                         } else {
-                            let clean_title = vn.title.replace(' ', "+");
+                            let clean_title = crate::system::percent_encode(&vn.title);
                             format!("https://vndb.org/v/all?sq={clean_title}")
                         };
                         rsx! {
                             button {
                                 class: "vndb-link-button",
                                 onclick: move |_| {
-                                    open_url_in_browser(&vndb_url);
+                                    let _ = crate::system::open_url(&vndb_url);
                                 },
                                 "Open on VNDB"
                             }
@@ -1117,8 +1099,23 @@ fn DescriptionPartView(part: DescriptionPart) -> Element {
             }
         }
         DescriptionPart::Link { label, url } => {
-            rsx! {
-                a { href: "{url}", target: "_blank", "{label}" }
+            if crate::system::is_safe_url(&url) {
+                let target_url = url.clone();
+                rsx! {
+                    a {
+                        href: "{url}",
+                        target: "_blank",
+                        onclick: move |e| {
+                            e.prevent_default();
+                            let _ = crate::system::open_url(&target_url);
+                        },
+                        "{label}"
+                    }
+                }
+            } else {
+                rsx! {
+                    span { "{label}" }
+                }
             }
         }
         DescriptionPart::Spoiler(parts) => {

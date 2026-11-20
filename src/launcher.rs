@@ -131,8 +131,7 @@ pub fn parse_steam_app_id(input: &str) -> Option<u32> {
             return Some(id);
         }
     }
-    let digits: String = trimmed.chars().filter(|c| c.is_ascii_digit()).collect();
-    digits.parse::<u32>().ok()
+    None
 }
 
 pub fn split_launch_arguments(input: &str) -> Vec<String> {
@@ -175,32 +174,37 @@ fn open_launch_log(log_path: Option<PathBuf>) -> io::Result<(Option<fs::File>, O
     Ok((Some(stdout_file), Some(stderr_file)))
 }
 
-pub fn launch_executable(
-    executable_path: String,
-    launch_mode: LaunchMode,
-    steam_app_id: Option<u32>,
-    wine_binary: Option<String>,
-    wine_prefix: Option<String>,
-    wine_locale: Option<String>,
-    proton_path: Option<String>,
-    umu_game_id: String,
-    launch_arguments: String,
-    launch_environment: Vec<(String, String)>,
-    launch_log_path: Option<PathBuf>,
-    run_with_locale_emulator: bool,
-    leproc_path: Option<String>,
-) -> Result<Child, io::Error> {
-    let path = PathBuf::from(executable_path);
+#[derive(Debug, Clone)]
+pub struct LaunchOptions {
+    pub executable_path: String,
+    pub launch_mode: LaunchMode,
+    pub steam_app_id: Option<u32>,
+    pub wine_binary: Option<String>,
+    pub wine_prefix: Option<String>,
+    pub wine_locale: Option<String>,
+    pub proton_path: Option<String>,
+    pub umu_game_id: String,
+    pub launch_arguments: String,
+    pub launch_environment: Vec<(String, String)>,
+    pub launch_log_path: Option<PathBuf>,
+    pub run_with_locale_emulator: bool,
+    pub leproc_path: Option<String>,
+}
+
+pub fn launch_executable(options: LaunchOptions) -> Result<Option<Child>, io::Error> {
+    let path = PathBuf::from(&options.executable_path);
     let working_directory = path.parent().map(Path::to_path_buf);
-    let (stdout_log, stderr_log) = open_launch_log(launch_log_path)?;
-    let parsed_args = split_launch_arguments(&launch_arguments);
-    let child: Child = match launch_mode {
+    let (stdout_log, stderr_log) = open_launch_log(options.launch_log_path)?;
+    let parsed_args = split_launch_arguments(&options.launch_arguments);
+
+    match options.launch_mode {
         LaunchMode::Native => {
-            let mut command = if cfg!(target_os = "windows") && run_with_locale_emulator {
-                let leproc = leproc_path
+            let mut command = if cfg!(target_os = "windows") && options.run_with_locale_emulator {
+                let leproc = options
+                    .leproc_path
                     .or_else(detect_leproc_path)
                     .unwrap_or_else(|| "LEProc.exe".to_string());
-                let mut cmd = host_command(leproc, launch_environment.clone(), working_directory.clone());
+                let mut cmd = host_command(leproc, options.launch_environment, working_directory);
                 cmd.arg("-run");
                 cmd.arg(path.to_string_lossy().to_string());
                 cmd.args(&parsed_args);
@@ -208,44 +212,44 @@ pub fn launch_executable(
             } else {
                 let mut cmd = host_command(
                     path.to_string_lossy().to_string(),
-                    launch_environment.clone(),
-                    working_directory.clone(),
+                    options.launch_environment,
+                    working_directory,
                 );
                 cmd.args(&parsed_args);
                 cmd
             };
             attach_launch_log(&mut command, stdout_log, stderr_log);
-            command.spawn()?
+            Ok(Some(command.spawn()?))
         }
         LaunchMode::Wine => {
-            let wine_command = wine_binary.unwrap_or_else(|| "wine".to_string());
-            let mut environment = launch_environment.clone();
-            if let Some(prefix) = wine_prefix {
+            let wine_command = options.wine_binary.unwrap_or_else(|| "wine".to_string());
+            let mut environment = options.launch_environment;
+            if let Some(prefix) = options.wine_prefix {
                 environment.push(("WINEPREFIX".to_string(), prefix));
             }
-            if let Some(locale) = wine_locale {
+            if let Some(locale) = options.wine_locale {
                 environment.push(("LANG".to_string(), locale.clone()));
                 environment.push(("LC_ALL".to_string(), locale));
             }
-            let mut command = host_command(wine_command, environment, working_directory.clone());
+            let mut command = host_command(wine_command, environment, working_directory);
             command.arg(path);
             command.args(&parsed_args);
             attach_launch_log(&mut command, stdout_log, stderr_log);
-            command.spawn()?
+            Ok(Some(command.spawn()?))
         }
         LaunchMode::Proton => {
-            let mut environment = launch_environment.clone();
-            if let Some(prefix) = wine_prefix {
+            let mut environment = options.launch_environment;
+            if let Some(prefix) = options.wine_prefix {
                 environment.push(("WINEPREFIX".to_string(), prefix));
             }
-            if let Some(proton_path) = proton_path {
+            if let Some(proton_path) = options.proton_path {
                 environment.push(("PROTONPATH".to_string(), proton_path));
             }
-            if let Some(locale) = wine_locale {
+            if let Some(locale) = options.wine_locale {
                 environment.push(("LANG".to_string(), locale.clone()));
                 environment.push(("LC_ALL".to_string(), locale));
             }
-            environment.push(("GAMEID".to_string(), umu_game_id));
+            environment.push(("GAMEID".to_string(), options.umu_game_id));
             let mut command = if std::env::var_os("FLATPAK_ID").is_some() {
                 let mut command = Command::new("/app/bin/umu-run");
                 if let Some(directory) = working_directory {
@@ -264,36 +268,28 @@ pub fn launch_executable(
             command.arg(path);
             command.args(&parsed_args);
             attach_launch_log(&mut command, stdout_log, stderr_log);
-            command.spawn()?
+            Ok(Some(command.spawn()?))
         }
         LaunchMode::Steam => {
-            let app_id = steam_app_id.ok_or_else(|| {
+            let app_id = options.steam_app_id.ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "Steam App ID is not configured",
                 )
             })?;
 
-            let mut command = if cfg!(target_os = "windows") {
-                let mut command = Command::new("cmd");
-                command
-                    .arg("/C")
-                    .arg("start")
-                    .arg("")
-                    .arg(format!("steam://rungameid/{app_id}"));
-                command
+            if cfg!(target_os = "windows") {
+                crate::system::open_url(&format!("steam://rungameid/{app_id}"))?;
+                Ok(None)
             } else {
                 let mut command =
-                    host_command("steam".to_string(), launch_environment, working_directory);
+                    host_command("steam".to_string(), options.launch_environment, working_directory);
                 command.arg("-applaunch").arg(app_id.to_string());
-                command
-            };
-
-            attach_launch_log(&mut command, stdout_log, stderr_log);
-            command.spawn()?
+                attach_launch_log(&mut command, stdout_log, stderr_log);
+                Ok(Some(command.spawn()?))
+            }
         }
-    };
-    Ok(child)
+    }
 }
 
 pub enum ToolLaunch {
@@ -446,7 +442,8 @@ mod tests {
             parse_steam_app_id("steam://rungameid/1989270"),
             Some(1989270)
         );
-        assert_eq!(parse_steam_app_id("e1989270"), Some(1989270));
+        assert_eq!(parse_steam_app_id("e1989270"), None);
+        assert_eq!(parse_steam_app_id("Higurashi 1 (Chapter 2)"), None);
         assert_eq!(parse_steam_app_id("  412830  "), Some(412830));
         assert_eq!(parse_steam_app_id(""), None);
         assert_eq!(parse_steam_app_id("invalid"), None);

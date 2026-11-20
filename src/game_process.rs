@@ -4,40 +4,74 @@ use std::process::Child;
 use std::thread;
 use std::time::{Duration, Instant};
 
-const POLL_INTERVAL: Duration = Duration::from_secs(3);
+const POLL_INTERVAL: Duration = Duration::from_secs(2);
+const MAX_TICK_DELTA: Duration = Duration::from_secs(30);
 const STARTUP_GRACE: Duration = Duration::from_secs(10);
 const STEAM_STARTUP_GRACE: Duration = Duration::from_secs(35);
 
 pub fn wait_for_game_exit(
-    mut child: Child,
+    mut child: Option<Child>,
     game_folder: Option<PathBuf>,
     is_steam: bool,
-) -> Result<Instant, io::Error> {
-    child.wait()?;
-    let child_exited_at = Instant::now();
-    let Some(game_folder) = game_folder else {
-        return Ok(child_exited_at);
-    };
-    let folder = normalize_path(&game_folder.to_string_lossy());
-    if folder.is_empty() {
-        return Ok(child_exited_at);
-    }
+) -> Result<u64, io::Error> {
     let startup_grace = if is_steam {
         STEAM_STARTUP_GRACE
     } else {
         STARTUP_GRACE
     };
-    let mut last_seen = child_exited_at;
+    let folder = game_folder
+        .map(|f| normalize_path(&f.to_string_lossy()))
+        .unwrap_or_default();
+
+    let started_at = Instant::now();
+    let mut last_tick = Instant::now();
+    let mut accumulated_seconds: u64 = 0;
     let mut seen_game_process = false;
+
     loop {
-        if game_process_running(&folder) {
-            seen_game_process = true;
-            last_seen = Instant::now();
-        } else if seen_game_process || child_exited_at.elapsed() >= startup_grace {
-            return Ok(last_seen);
-        }
         thread::sleep(POLL_INTERVAL);
+
+        let now = Instant::now();
+        let delta = now.duration_since(last_tick);
+        last_tick = now;
+
+        let child_running = if let Some(ref mut c) = child {
+            match c.try_wait()? {
+                Some(_) => {
+                    child = None;
+                    false
+                }
+                None => true,
+            }
+        } else {
+            false
+        };
+
+        let folder_running = if !folder.is_empty() {
+            game_process_running(&folder)
+        } else {
+            false
+        };
+
+        if folder_running {
+            seen_game_process = true;
+        }
+
+        let is_running = child_running || folder_running;
+
+        if is_running {
+            let tick_secs = if delta > MAX_TICK_DELTA {
+                POLL_INTERVAL.as_secs()
+            } else {
+                delta.as_secs()
+            };
+            accumulated_seconds = accumulated_seconds.saturating_add(tick_secs);
+        } else if seen_game_process || started_at.elapsed() >= startup_grace {
+            break;
+        }
     }
+
+    Ok(accumulated_seconds)
 }
 
 fn normalize_path(path: &str) -> String {
@@ -142,10 +176,52 @@ pub fn game_folder_for(game_folder: Option<&str>, executable_path: &str) -> Opti
         .filter(|folder| !folder.as_os_str().is_empty())
 }
 
+#[cfg(target_os = "windows")]
+fn read_steam_registry_path() -> Option<PathBuf> {
+    use windows_sys::Win32::System::Registry::{
+        RegGetValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ,
+    };
+
+    let read_key = |hkey: HKEY, subkey: &str, value: &str| -> Option<PathBuf> {
+        let subkey_wide: Vec<u16> = subkey.encode_utf16().chain(Some(0)).collect();
+        let value_wide: Vec<u16> = value.encode_utf16().chain(Some(0)).collect();
+        let mut buf = [0u16; 512];
+        let mut buf_bytes = (buf.len() * std::mem::size_of::<u16>()) as u32;
+
+        let status = unsafe {
+            RegGetValueW(
+                hkey,
+                subkey_wide.as_ptr(),
+                value_wide.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr().cast(),
+                &mut buf_bytes,
+            )
+        };
+
+        if status == 0 {
+            let len_chars = (buf_bytes as usize / 2).saturating_sub(1);
+            let val = String::from_utf16_lossy(&buf[..len_chars]).trim().to_string();
+            if !val.is_empty() {
+                return Some(PathBuf::from(val));
+            }
+        }
+        None
+    };
+
+    read_key(HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath")
+        .or_else(|| read_key(HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"))
+        .or_else(|| read_key(HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath"))
+}
+
 pub fn resolve_steam_game_folder(app_id: u32) -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
         let mut candidates = Vec::new();
+        if let Some(reg_path) = read_steam_registry_path() {
+            candidates.push(reg_path);
+        }
         if let Some(prog_files_x86) = std::env::var_os("ProgramFiles(x86)") {
             candidates.push(PathBuf::from(prog_files_x86).join("Steam"));
         }

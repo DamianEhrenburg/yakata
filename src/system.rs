@@ -73,17 +73,66 @@ pub fn is_flatpak_document_portal_path(path: &str) -> bool {
     path_after_user_id.starts_with("doc/")
 }
 
-pub fn open_url(url: &str) -> Result<(), io::Error> {
-    if cfg!(target_os = "windows") {
-        Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()?;
-    } else {
-        Command::new("xdg-open")
-            .arg(url)
-            .spawn()?;
+pub fn is_safe_url(url: &str) -> bool {
+    url.starts_with("http://") || url.starts_with("https://") || url.starts_with("steam://")
+}
+
+pub fn percent_encode(input: &str) -> String {
+    let mut encoded = String::with_capacity(input.len());
+    for b in input.bytes() {
+        match b {
+            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(b as char);
+            }
+            b' ' => encoded.push('+'),
+            _ => {
+                encoded.push_str(&format!("%{b:02X}"));
+            }
+        }
     }
-    Ok(())
+    encoded
+}
+
+pub fn open_url(url: &str) -> Result<(), io::Error> {
+    if !is_safe_url(url) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Invalid URL scheme: only http, https, and steam are allowed",
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+
+        let wide_url: Vec<u16> = url.encode_utf16().chain(Some(0)).collect();
+        let wide_op: Vec<u16> = "open".encode_utf16().chain(Some(0)).collect();
+
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                wide_op.as_ptr(),
+                wide_url.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                1,
+            )
+        };
+
+        if (result as isize) > 32 {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "ShellExecuteW failed with code {result:?}"
+            )))
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        Command::new("xdg-open").arg(url).spawn()?;
+        Ok(())
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -142,5 +191,24 @@ mod tests {
         assert_eq!(parse_semver("1.2.3-beta"), Some((1, 2, 3)));
         assert!(parse_semver("0.3.0") > parse_semver("0.2.1"));
         assert_eq!(parse_semver("invalid"), None);
+    }
+
+    #[test]
+    fn test_is_safe_url() {
+        assert!(is_safe_url("https://vndb.org/v17"));
+        assert!(is_safe_url("http://example.com"));
+        assert!(is_safe_url("steam://rungameid/12345"));
+        assert!(!is_safe_url("file:///C:/Windows/notepad.exe"));
+        assert!(!is_safe_url("javascript:alert(1)"));
+        assert!(!is_safe_url("cmd.exe /c calc"));
+    }
+
+    #[test]
+    fn test_percent_encode() {
+        assert_eq!(percent_encode("Hello World"), "Hello+World");
+        assert_eq!(
+            percent_encode("Fate/stay night & hollow"),
+            "Fate%2Fstay+night+%26+hollow"
+        );
     }
 }
